@@ -1,0 +1,66 @@
+name: Update nowcast radar map
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub Actions doesn't guarantee this fires at
+    # exactly :00/:15/:30/:45 -- under load it can slip by a few minutes,
+    # which is fine here since the radars themselves only refresh every
+    # ~10 minutes anyway.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+    # Lets you trigger a run manually from the Actions tab any time you
+    # want to test a change without waiting for the next scheduled tick.
+
+# Only one run at a time -- a 15-minute cron shouldn't normally overlap,
+# but this is cheap insurance against two runs racing to commit/push state
+# at once if a run ever takes longer than expected.
+concurrency:
+  group: nowcast-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # needed so the workflow can commit updated state/ and archive/ back to the repo
+
+jobs:
+  update-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tesseract OCR (system package -- pytesseract just wraps this binary)
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one nowcast polling cycle
+        run: python nowcast_bot.py
+
+      - name: Commit updated tracking state + frame archive
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update nowcast tracking state"
+          file_pattern: "state/ archive/"
+          commit_user_name: "nowcast-bot"
+          commit_user_email: "actions@users.noreply.github.com"
+
+      - name: Upload storm_forecast_map.html to plots.chennairains.com
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./output/
+          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
+          # Never delete anything already sitting in that remote folder --
+          # this only ever adds/overwrites storm_forecast_map.html.
+          dangerous-clean-slate: false
