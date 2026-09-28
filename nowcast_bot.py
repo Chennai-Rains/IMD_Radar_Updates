@@ -1268,12 +1268,28 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     new_cells = extract_cells(dbz, product, elevation_deg)
     new_cells = cluster_cells(new_cells)
 
-    dt_minutes = ((obs_time - prev_obs_time[product]).total_seconds() / 60.0
-                  if obs_time and prev_obs_time[product] else 0)
+    # Karaikal's OCR-based obs_time read fails noticeably more often than
+    # NIOT's (see extract_observation_time's docstring) -- when it does,
+    # obs_time is None here. Requiring a *real* obs_time to compute
+    # dt_minutes silently forced dt_minutes to 0 on every OCR miss, which
+    # made track_cells report every matched cell's speed as exactly 0 km/h
+    # (velocity_kmh = dist / (dt/60), and the "dt <= 0 -> speed 0" branch
+    # in track_cells), which in turn made build_forecast_map's
+    # min_speed_kmh filter drop every single Karaikal cell's forecast cone
+    # -- even for storms that were genuinely moving. Falling back to
+    # poll-receipt time (now) here, same as the archive-filename tag
+    # already does a few lines up, keeps dt_minutes close to the real ~15
+    # min cron cadence instead of collapsing to zero. This is only the
+    # basis for the VELOCITY math; last_obs_time_seen (the banner) still
+    # reports the honest OCR result, None included, so the displayed
+    # timestamp is never silently fudged.
+    obs_time_effective = obs_time or datetime.now(timezone.utc)
+    dt_minutes = ((obs_time_effective - prev_obs_time[product]).total_seconds() / 60.0
+                  if prev_obs_time[product] else 0)
     tracked = track_cells(prev_cells[product], new_cells, dt_minutes)
 
     prev_cells[product] = tracked
-    prev_obs_time[product] = obs_time or datetime.now(timezone.utc)
+    prev_obs_time[product] = obs_time_effective
     return dbz
 
 
