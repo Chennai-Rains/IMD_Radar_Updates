@@ -912,44 +912,6 @@ def uncertainty_cone_polygon(lat: float, lon: float, speed_kmh: float, bearing_d
     return [apex] + arc_points + [apex]
 
 
-def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
-    """A small fixed banner (top-right, where the layer toggle used to sit)
-    showing each displayed product's most recent radar observation time --
-    converted to IST, since the audience is chennairains.com's readers, not
-    UTC-native -- plus a standing disclaimer. Without a visible timestamp a
-    viewer has no way to tell whether they're looking at a live storm or a
-    stale page that failed to refresh; the disclaimer matters because this
-    is a derived/experimental product, not an official IMD or ChennaiRains
-    forecast, and that needs to be obvious on the page itself, not just in
-    a README nobody visiting the site will ever read."""
-    ist = ZoneInfo("Asia/Kolkata")
-    lines = []
-    for product in products:
-        obs_time = last_obs_time_seen.get(product)
-        label = PRODUCT_STYLE.get(product, {"label": product.upper()})["label"].split(" - ")[0]
-        if obs_time:
-            local = obs_time.astimezone(ist)
-            lines.append(f"{label}: {local.strftime('%d %b, %H:%M')} IST")
-        else:
-            lines.append(f"{label}: time unavailable")
-    times_html = "<br>".join(lines)
-    return f"""
-    <div style="position: fixed; top: 12px; right: 50px; z-index: 9999;
-                background: rgba(255,255,255,0.92); padding: 8px 12px;
-                border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
-                font-family: -apple-system, Arial, sans-serif; font-size: 11px;
-                color: #333; max-width: 230px; line-height: 1.5;">
-        <div style="font-weight: 700; color: #b45309; margin-bottom: 4px;">
-            &#9888; Experimental nowcast
-        </div>
-        <div style="margin-bottom: 4px;">{times_html}</div>
-        <div style="font-size: 10px; color: #666;">
-            Based on IMD radar imagery. Not an official forecast.
-        </div>
-    </div>
-    """
-
-
 LOGO_PATH = Path(__file__).parent / "assets" / "chennairains_logo.jpg"
 
 
@@ -966,27 +928,96 @@ def _logo_data_uri() -> str | None:
     return f"data:image/jpeg;base64,{encoded}"
 
 
-def build_branding_html() -> str:
-    """ChennaiRains logo (top-left, links back to the site) plus a light,
-    tiled diagonal watermark across the whole map. The watermark exists
+def build_logo_tag(height_px: int = 26) -> str:
+    """Just the <a><img></a> fragment (no fixed positioning of its own) so
+    it can be dropped inline next to other UI, e.g. inside the info banner's
+    header row. Empty string if the logo asset is missing."""
+    logo_uri = _logo_data_uri()
+    if not logo_uri:
+        return ""
+    return (
+        f'<a href="https://www.chennairains.com" target="_blank" rel="noopener" '
+        f'style="text-decoration:none; flex-shrink:0;">'
+        f'<img src="{logo_uri}" alt="ChennaiRains" '
+        f'style="height:{height_px}px; width:{height_px}px; display:block; '
+        f'border-radius:6px;"></a>'
+    )
+
+
+def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
+    """A small fixed banner (top-right, where the layer toggle used to sit)
+    showing each displayed product's most recent radar observation time --
+    converted to IST, since the audience is chennairains.com's readers, not
+    UTC-native -- plus a standing disclaimer. Without a visible timestamp a
+    viewer has no way to tell whether they're looking at a live storm or a
+    stale page that failed to refresh; the disclaimer matters because this
+    is a derived/experimental product, not an official IMD or ChennaiRains
+    forecast, and that needs to be obvious on the page itself, not just in
+    a README nobody visiting the site will ever read.
+
+    The ChennaiRains logo sits inline in this same box, next to the title --
+    previously it floated on its own over the top-left corner, where it sat
+    on top of Leaflet's zoom control. Anchoring it here instead keeps it
+    away from any map control regardless of screen size."""
+    ist = ZoneInfo("Asia/Kolkata")
+    lines = []
+    for product in products:
+        obs_time = last_obs_time_seen.get(product)
+        label = PRODUCT_STYLE.get(product, {"label": product.upper()})["label"].split(" - ")[0]
+        if obs_time:
+            local = obs_time.astimezone(ist)
+            lines.append(f"{label}: {local.strftime('%d %b, %H:%M')} IST")
+        else:
+            lines.append(f"{label}: time unavailable")
+    times_html = "<br>".join(lines)
+    logo_tag = build_logo_tag()
+    return f"""
+    <div style="position: fixed; top: 12px; right: 12px; z-index: 9999;
+                background: rgba(255,255,255,0.92); padding: 8px 12px;
+                border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+                font-family: -apple-system, Arial, sans-serif; font-size: 11px;
+                color: #333; max-width: 230px; line-height: 1.5;">
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+            {logo_tag}
+            <div style="font-weight: 700; color: #b45309;">
+                &#9888; Experimental nowcast
+            </div>
+        </div>
+        <div style="margin-bottom: 4px;">{times_html}</div>
+        <div style="font-size: 10px; color: #666;">
+            Based on IMD radar imagery. Not an official forecast.
+        </div>
+    </div>
+    """
+
+
+def build_fallback_logo_html() -> str:
+    """Standalone logo box for the (rare) case there's no reflectivity data
+    yet to show the info banner at all -- keeps the branding present on
+    every map, not just ones with a storm to draw. Anchored top-right, same
+    corner as the info banner would occupy, so it never overlaps Leaflet's
+    top-left zoom control."""
+    logo_uri = _logo_data_uri()
+    if not logo_uri:
+        return ""
+    return f"""
+    <a href="https://www.chennairains.com" target="_blank" rel="noopener"
+       style="position: fixed; top: 12px; right: 12px; z-index: 9999;
+              text-decoration: none;">
+        <img src="{logo_uri}" alt="ChennaiRains"
+             style="height: 40px; width: 40px; display: block;
+                    border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+                    background: rgba(255,255,255,0.85); padding: 2px;">
+    </a>
+    """
+
+
+def build_watermark_html() -> str:
+    """A light, tiled diagonal watermark across the whole map. It exists
     specifically so a screenshot of this page still carries attribution --
     faint enough not to interfere with reading the radar/cones, but present
     everywhere so it can't just be cropped out of a corner. pointer-events:
-    none on both so neither ever blocks clicking the map underneath."""
-    logo_uri = _logo_data_uri()
-    logo_html = ""
-    if logo_uri:
-        logo_html = f"""
-        <a href="https://www.chennairains.com" target="_blank" rel="noopener"
-           style="position: fixed; top: 12px; left: 12px; z-index: 9999;
-                  pointer-events: auto; text-decoration: none;">
-            <img src="{logo_uri}" alt="ChennaiRains"
-                 style="height: 44px; width: 44px; display: block;
-                        border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.35);
-                        background: rgba(255,255,255,0.85); padding: 2px;">
-        </a>
-        """
-
+    none so it never blocks clicking the map underneath."""
     watermark_text = "Radar map by www.chennairains.com"
     watermark_svg = f"""
     <svg xmlns='http://www.w3.org/2000/svg' width='420' height='260'>
@@ -1000,13 +1031,12 @@ def build_branding_html() -> str:
         watermark_svg.encode("utf-8")
     ).decode("ascii")
 
-    watermark_html = f"""
+    return f"""
     <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%;
                 z-index: 9997; pointer-events: none;
                 background-image: url('{watermark_data_uri}');
                 background-repeat: repeat;"></div>
     """
-    return logo_html + watermark_html
 
 
 def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
@@ -1135,8 +1165,12 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     if any(p in _last_dbz for p in products):
         m.get_root().html.add_child(folium.Element(build_dbz_legend_html(products)))
         m.get_root().html.add_child(folium.Element(build_info_banner_html(products, _last_obs_time_seen)))
+    else:
+        # No reflectivity yet to anchor the info banner to -- show the logo
+        # on its own so branding is still present on every map.
+        m.get_root().html.add_child(folium.Element(build_fallback_logo_html()))
 
-    m.get_root().html.add_child(folium.Element(build_branding_html()))
+    m.get_root().html.add_child(folium.Element(build_watermark_html()))
 
     if out_html:
         m.save(out_html)
