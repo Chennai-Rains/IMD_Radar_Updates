@@ -45,6 +45,25 @@ jobs:
       - name: Run one nowcast polling cycle
         run: python nowcast_bot.py
 
+      - name: Rebase onto latest main before committing
+        # A run's git history is fixed the moment actions/checkout runs,
+        # but the polling cycle above can take a little while -- if a
+        # manual code push (or another run, in a rarer race) lands on
+        # main in that window, this run's later commit+push would be
+        # rejected as non-fast-forward and its state update silently
+        # lost (this is exactly what happened once: a manual push landed
+        # mid-run and the state commit that followed got rejected).
+        # --autostash handles the uncommitted state/archive/output files
+        # this step runs with in the working tree: stash them, fast-
+        # forward onto whatever's newest on main (there's nothing of
+        # ours to replay -- nothing's committed yet), then restore them
+        # on top. continue-on-error, because even if this ever does hit
+        # a genuine conflict, that should cost this one cycle's tracking
+        # state -- which self-heals next run -- not the live map upload
+        # in the step after this one.
+        run: git fetch origin main && git rebase origin/main --autostash
+        continue-on-error: true
+
       - name: Commit updated tracking state + frame archive
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
