@@ -59,6 +59,13 @@ jobs:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
+          port: 21
+          # cPanel's FTP Accounts page for this account explicitly offers
+          # "FTP & explicit FTPS" on port 21 -- explicit FTPS negotiates
+          # TLS over the same plain-FTP port (STARTTLS-style), so this is
+          # both more secure than plain FTP and matches what the host
+          # actually advertises supporting.
+          protocol: ftps
           local-dir: ./output/
           server-dir: ${{ secrets.FTP_REMOTE_DIR }}
           # Never delete anything already sitting in that remote folder --
