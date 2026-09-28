@@ -873,7 +873,8 @@ def build_dbz_legend_html(products: tuple, n_swatches: int = 8) -> str:
     """
 
 
-# === CELL 26 (forecast map) ===
+from zoneinfo import ZoneInfo
+
 FORECAST_STYLE = {
     30: {"color": "#fdae61", "label": "+30 min"},
     60: {"color": "#f46d43", "label": "+60 min"},
@@ -910,6 +911,44 @@ def uncertainty_cone_polygon(lat: float, lon: float, speed_kmh: float, bearing_d
     return [apex] + arc_points + [apex]
 
 
+def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
+    """A small fixed banner (top-right, where the layer toggle used to sit)
+    showing each displayed product's most recent radar observation time --
+    converted to IST, since the audience is chennairains.com's readers, not
+    UTC-native -- plus a standing disclaimer. Without a visible timestamp a
+    viewer has no way to tell whether they're looking at a live storm or a
+    stale page that failed to refresh; the disclaimer matters because this
+    is a derived/experimental product, not an official IMD or ChennaiRains
+    forecast, and that needs to be obvious on the page itself, not just in
+    a README nobody visiting the site will ever read."""
+    ist = ZoneInfo("Asia/Kolkata")
+    lines = []
+    for product in products:
+        obs_time = last_obs_time_seen.get(product)
+        label = PRODUCT_STYLE.get(product, {"label": product.upper()})["label"].split(" - ")[0]
+        if obs_time:
+            local = obs_time.astimezone(ist)
+            lines.append(f"{label}: {local.strftime('%d %b, %H:%M')} IST")
+        else:
+            lines.append(f"{label}: time unavailable")
+    times_html = "<br>".join(lines)
+    return f"""
+    <div style="position: fixed; top: 12px; right: 50px; z-index: 9999;
+                background: rgba(255,255,255,0.92); padding: 8px 12px;
+                border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+                font-family: -apple-system, Arial, sans-serif; font-size: 11px;
+                color: #333; max-width: 230px; line-height: 1.5;">
+        <div style="font-weight: 700; color: #b45309; margin-bottom: 4px;">
+            &#9888; Experimental nowcast
+        </div>
+        <div style="margin-bottom: 4px;">{times_html}</div>
+        <div style="font-size: 10px; color: #666;">
+            Based on IMD radar imagery. Not an official forecast.
+        </div>
+    </div>
+    """
+
+
 def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
                         lead_times_min: tuple = (30, 60, 90),
                         min_speed_kmh: float = 5.0,
@@ -922,7 +961,13 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     centroid), same reasoning as build_osm_verification_map's overlay.
 
     products: tuple of product keys, e.g. ("maxz",) for NIOT only, or
-        ("maxz", "kkl_maxz") for NIOT + Karaikal together.
+        ("maxz", "kkl_maxz") for NIOT + Karaikal together. Unlike
+        build_osm_verification_map(), this always draws every shown
+        product's raster directly on the map with no per-radar toggle --
+        live comparison between NIOT and Karaikal showed the two agree
+        closely enough on storm location that a separate on/off control
+        per radar wasn't adding anything, just one more thing to misclick.
+
     fuse: with more than one radar in `products`, cross-radar cluster the
         cells first (cluster_cells over every shown product's cells) so a
         storm sitting in both radars' coverage gets ONE projected cone
@@ -975,21 +1020,17 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     # Reflectivity raster overlay -- same dbz_array_to_png()/plot_bounds_latlon()
     # pipeline as build_osm_verification_map(), so the storm's real shape is
     # visible under the markers/cones instead of just a dot at its centroid.
-    # One FeatureGroup per product when more than one is shown, so they can
-    # be toggled independently via the LayerControl.
-    multi = len(products) > 1
+    # Drawn directly on the map (no per-product FeatureGroup/toggle -- see
+    # the products docstring above for why).
     for product in products:
         if product not in _last_dbz:
             continue
         style = PRODUCT_STYLE.get(product, {"label": product.upper()})
-        target = folium.FeatureGroup(name=f"{style['label']} reflectivity", show=True) if multi else m
         png_path = f"_forecast_overlay_{product}.png"
         dbz_array_to_png(_last_dbz[product], product, png_path)
         south, west, north, east = plot_bounds_latlon(product)
         ImageOverlay(image=png_path, bounds=[[south, west], [north, east]],
-                     opacity=0.7, name=f"{style['label']} reflectivity").add_to(target)
-        if multi:
-            target.add_to(m)
+                     opacity=0.7, name=f"{style['label']} reflectivity").add_to(m)
 
     do_fuse = fuse and len({PRODUCT_RADAR[p] for p in products}) > 1
     if do_fuse:
@@ -1031,11 +1072,9 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
         print("No cells with usable velocity yet — need at least two consecutive "
               "run_once() calls on a moving storm before there's anything to project.")
 
-    if multi:
-        folium.LayerControl(collapsed=False).add_to(m)
-
     if any(p in _last_dbz for p in products):
         m.get_root().html.add_child(folium.Element(build_dbz_legend_html(products)))
+        m.get_root().html.add_child(folium.Element(build_info_banner_html(products, _last_obs_time_seen)))
 
     if out_html:
         m.save(out_html)
@@ -1043,6 +1082,13 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
 
     return m
 
+
+# Same MAXZ-only, cross-radar-fused default as build_osm_verification_map,
+# and for the same reason (PPI/PPZ's near-white/near-ocean-blue bands
+# collide with each radar's own pale basemap fill often enough to be
+# visually distracting). Drop back to build_forecast_map() (NIOT MAXZ only)
+# if Karaikal's calibration hasn't been visually verified yet -- see the
+# CALIBRATION STATUS comment above RADAR_SITES.
 
 # === AUTOMATION GLUE (not from the notebook) ===
 #
@@ -1083,11 +1129,17 @@ POLLED_PRODUCTS = ("maxz", "kkl_maxz")
 KEEP_FRAMES_PER_PRODUCT = 6
 
 
-# build_forecast_map() (from cell 26) reads these two module-level globals
+# build_forecast_map() (from cell 26) reads these three module-level globals
 # directly, same as it does in the notebook -- initialized here so the name
 # exists even before run_pipeline() first assigns into it.
 _prev_cells: dict[str, list[Cell]] = {p: [] for p in POLLED_PRODUCTS}
 _last_dbz: dict[str, np.ndarray] = {}
+# Feeds build_info_banner_html()'s per-radar timestamp readout -- set fresh
+# each run in run_pipeline() from whatever observation time was actually
+# used to build this cycle's map (either a freshly-polled frame's own
+# obs_time, or -- on a fetch failure -- the timestamp parsed back out of
+# the archived frame we fell back to).
+_last_obs_time_seen: dict[str, "datetime | None"] = {p: None for p in POLLED_PRODUCTS}
 
 
 def _cell_to_dict(c: Cell) -> dict:
@@ -1144,12 +1196,33 @@ def prune_archive(product: str) -> None:
         old.unlink()
 
 
-def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: dict) -> np.ndarray | None:
+def _obs_time_from_archive_filename(path: Path) -> "datetime | None":
+    """Archived frames are named `{product}_{tag}.gif` where tag is either
+    an obs_time formatted as %Y%m%dT%H%M%SZ, or -- when a frame had no
+    readable timestamp at capture time -- a raw epoch-seconds int instead
+    (see poll_and_decode's `tag = ... else int(now)` fallback). Used when a
+    live fetch fails and we fall back to the last archived frame, so the
+    banner can still show a real time instead of just "time unavailable"."""
+    stem = path.stem  # e.g. "maxz_20260928T125640Z" or "kkl_maxz_1790602773"
+    tag = stem.rsplit("_", 1)[-1]
+    try:
+        return datetime.strptime(tag, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None  # epoch-int fallback name -- no reliable obs_time to recover
+
+
+def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: dict,
+                     last_obs_time_seen: dict) -> np.ndarray | None:
     """One polling cycle for `product`, adapted from the notebook's
     poll_one_product() for a stateless-process world: tracking state
     (prev_cells/prev_obs_time) is passed in and mutated in place instead of
     read from module globals, since nothing here persists between runs
     except what's explicitly saved to state/ afterward.
+
+    `last_obs_time_seen` is mutated in place with this product's observation
+    time as soon as it's known (whether or not the frame turns out to be
+    new) -- it's how build_info_banner_html() finds out what to display,
+    via run_pipeline() copying this dict into the module-level global.
 
     Returns the decoded reflectivity array for the map to draw, or None if
     the fetch itself failed outright (radar feed unreachable this cycle) --
@@ -1170,6 +1243,7 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
         return None
 
     obs_time = extract_observation_time(img, product)
+    last_obs_time_seen[product] = obs_time
     lut = build_lut_from_colorbar(img, product)
     dbz = decode_reflectivity(img, product, lut)
 
@@ -1209,15 +1283,16 @@ def run_pipeline() -> None:
     once per GitHub Actions run (see .github/workflows/nowcast.yml) -- the
     15-minute cadence comes from the workflow's cron schedule, not from
     anything in this script looping."""
-    global _last_dbz, _prev_cells
+    global _last_dbz, _prev_cells, _last_obs_time_seen
 
     state = load_state()
     prev_cells = load_prev_cells()
     prev_obs_time = load_prev_obs_time()
 
     _last_dbz = {}
+    last_obs_time_seen: dict[str, "datetime | None"] = {p: None for p in POLLED_PRODUCTS}
     for product in POLLED_PRODUCTS:
-        dbz = poll_and_decode(product, state, prev_cells, prev_obs_time)
+        dbz = poll_and_decode(product, state, prev_cells, prev_obs_time, last_obs_time_seen)
         if dbz is not None:
             _last_dbz[product] = dbz
         else:
@@ -1232,11 +1307,13 @@ def run_pipeline() -> None:
                 img = Image.open(existing[-1])
                 lut = build_lut_from_colorbar(img, product)
                 _last_dbz[product] = decode_reflectivity(img, product, lut)
+                last_obs_time_seen[product] = _obs_time_from_archive_filename(existing[-1])
             else:
                 print(f"[poll] {product}: fetch failed and no archived frame to fall back to -- "
                       f"this product will be missing from this cycle's map")
 
     _prev_cells = prev_cells
+    _last_obs_time_seen = last_obs_time_seen
 
     save_state(state)
     save_prev_cells(prev_cells)
