@@ -1,4 +1,5 @@
 # === CELL 2 (imports) ===
+import base64
 import io
 import json
 import re
@@ -949,6 +950,65 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
     """
 
 
+LOGO_PATH = Path(__file__).parent / "assets" / "chennairains_logo.jpg"
+
+
+def _logo_data_uri() -> str | None:
+    """Base64-embeds the ChennaiRains logo directly into the HTML so the
+    map stays a single self-contained file (same reasoning as the raster
+    overlay PNGs -- no second asset to host/keep in sync). Returns None
+    if the logo asset is missing so a broken path never breaks the map
+    build itself, just silently skips the branding."""
+    if not LOGO_PATH.exists():
+        print(f"Logo asset not found at {LOGO_PATH} -- skipping branding.")
+        return None
+    encoded = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{encoded}"
+
+
+def build_branding_html() -> str:
+    """ChennaiRains logo (top-left, links back to the site) plus a light,
+    tiled diagonal watermark across the whole map. The watermark exists
+    specifically so a screenshot of this page still carries attribution --
+    faint enough not to interfere with reading the radar/cones, but present
+    everywhere so it can't just be cropped out of a corner. pointer-events:
+    none on both so neither ever blocks clicking the map underneath."""
+    logo_uri = _logo_data_uri()
+    logo_html = ""
+    if logo_uri:
+        logo_html = f"""
+        <a href="https://www.chennairains.com" target="_blank" rel="noopener"
+           style="position: fixed; top: 12px; left: 12px; z-index: 9999;
+                  pointer-events: auto; text-decoration: none;">
+            <img src="{logo_uri}" alt="ChennaiRains"
+                 style="height: 44px; width: 44px; display: block;
+                        border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+                        background: rgba(255,255,255,0.85); padding: 2px;">
+        </a>
+        """
+
+    watermark_text = "Radar map by www.chennairains.com"
+    watermark_svg = f"""
+    <svg xmlns='http://www.w3.org/2000/svg' width='420' height='260'>
+        <text x='210' y='135' transform='rotate(-28 210 135)'
+              font-family='Arial, sans-serif' font-size='13'
+              fill='rgba(0,0,0,0.14)' text-anchor='middle'
+              font-weight='600'>{watermark_text}</text>
+    </svg>
+    """
+    watermark_data_uri = "data:image/svg+xml;base64," + base64.b64encode(
+        watermark_svg.encode("utf-8")
+    ).decode("ascii")
+
+    watermark_html = f"""
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                z-index: 9997; pointer-events: none;
+                background-image: url('{watermark_data_uri}');
+                background-repeat: repeat;"></div>
+    """
+    return logo_html + watermark_html
+
+
 def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
                         lead_times_min: tuple = (30, 60, 90),
                         min_speed_kmh: float = 5.0,
@@ -1075,6 +1135,8 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     if any(p in _last_dbz for p in products):
         m.get_root().html.add_child(folium.Element(build_dbz_legend_html(products)))
         m.get_root().html.add_child(folium.Element(build_info_banner_html(products, _last_obs_time_seen)))
+
+    m.get_root().html.add_child(folium.Element(build_branding_html()))
 
     if out_html:
         m.save(out_html)

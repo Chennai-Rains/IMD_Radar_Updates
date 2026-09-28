@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Intermediate raster overlays regenerated fresh every run
+_forecast_overlay_*.png
+storm_forecast_map.html
