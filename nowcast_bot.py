@@ -441,10 +441,17 @@ CLUSTER_RADIUS_KM = 15.0
 ELEVATED_BEAM_THRESHOLD_KM = 1.5
 
 # How often an already-open browser tab reloads itself to pick up a newer
-# map -- see build_autorefresh_script(). Deliberately not exactly 15 (the
+# map -- see build_autorefresh_script(). Was 20; dropped to 10 because the
+# 20-minute refresh compounded with IMD's own radar-data lag (frames can
+# already be ~10 min stale by the time they're polled) to sometimes show a
+# map ~30 min out of date by the time a viewer's tab reloaded. 10 min means
+# an open tab will occasionally reload onto a cycle that hasn't produced a
+# newer frame yet (re-showing the same map), which is the accepted
+# trade-off -- a same-frame reload is a much smaller downside than sitting
+# on a stale one for up to 30 minutes. Deliberately not exactly 15 (the
 # upload cadence, see nowcast.yml/cron-job.org) so a reload rarely lands
 # on exactly the same moment as an in-progress upload every single cycle.
-AUTOREFRESH_MINUTES = 20
+AUTOREFRESH_MINUTES = 10
 
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
