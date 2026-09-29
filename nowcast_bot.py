@@ -5,7 +5,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -331,6 +331,160 @@ def range_from_site_km(latlon: tuple[float, float], product: str = "maxz") -> fl
     site = site_for(product)
     return _haversine_km((site["site_lat"], site["site_lon"]), latlon)
 
+# === CELL 8a (Karaikal bold-timestamp template matcher) ===
+# Tesseract's LSTM engine (the only one available in this sandbox/CI image)
+# was confirmed, via direct testing against real archived Karaikal frames,
+# to consistently misread this specific bold "digital display" font
+# regardless of upscale/threshold/psm/oem tuning (e.g. "28" -> "o8", "2026"
+# -> "2006") -- not a preprocessing problem, the model just doesn't know
+# this font. Karaikal's time line ("HH:MM:SSZ") is otherwise very
+# favourable for a much simpler, much more reliable technique: it's a
+# fixed-position, monospaced, high-contrast glyph run, so connected-
+# component segmentation + nearest-template matching against a small
+# labelled glyph library (built once from known-good archived frames,
+# shipped as assets/kkl_timestamp_templates.npz so it survives archive/
+# pruning) reads it correctly. Falls back to per-character Tesseract (more
+# reliable than whole-string OCR since there's no multi-char context to
+# confuse it) for any glyph the template library hasn't seen (notably: the
+# library was built from a handful of real frames and happens to have no
+# examples of digits 7/8/9 yet), and if that also can't confidently name a
+# glyph, extraction is abandoned for that frame -- same safe fall-back to
+# poll-receipt time as every other failure mode here.
+_KKL_TIMESTAMP_TEMPLATES: dict[str, list[np.ndarray]] | None = None
+_KKL_TEMPLATE_SIZE = (40, 60)  # (w, h), matches assets/kkl_timestamp_templates.npz
+
+
+def _load_kkl_timestamp_templates() -> dict[str, list[np.ndarray]]:
+    global _KKL_TIMESTAMP_TEMPLATES
+    if _KKL_TIMESTAMP_TEMPLATES is None:
+        templates: dict[str, list[np.ndarray]] = {}
+        path = Path(__file__).parent / "assets" / "kkl_timestamp_templates.npz"
+        data = np.load(path)
+        for img, ch in zip(data["images"], data["chars"]):
+            templates.setdefault(str(ch), []).append(img)
+        _KKL_TIMESTAMP_TEMPLATES = templates
+    return _KKL_TIMESTAMP_TEMPLATES
+
+
+def _kkl_char_groups(bw: np.ndarray, min_area: int = 15,
+                      left_margin: int = 40, right_margin: int = 780,
+                      merge_gap: int = 6) -> list[list[int]]:
+    """Connected-component segmentation for one line of Karaikal's bold
+    timestamp text. left_margin/right_margin drop a static artifact (a
+    border/edge sliver that shows up at the same x-position in every frame
+    regardless of what digits are printed -- confirmed by comparing frames
+    with different leading digits). Adjacent components are merged when
+    the gap between them is small (merge_gap): several digits in this font
+    render as 2-3 disconnected strokes (e.g. "5", and "0"'s hollow centre
+    can fully separate into two ink blobs at this threshold/resolution),
+    while genuine gaps between different characters are consistently
+    wider -- validated against every archived calibration frame."""
+    inv = (bw < 128).astype(np.uint8)
+    labeled, n = ndimage.label(inv, structure=np.ones((3, 3)))
+    boxes = []
+    for i in range(1, n + 1):
+        ys, xs = np.where(labeled == i)
+        if len(xs) < min_area:
+            continue
+        x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+        if x1 < left_margin or x0 > right_margin:
+            continue
+        boxes.append([x0, x1, y0, y1])
+    boxes.sort(key=lambda b: b[0])
+    merged: list[list[int]] = []
+    for b in boxes:
+        if merged and b[0] - merged[-1][1] <= merge_gap:
+            merged[-1][1] = max(merged[-1][1], b[1])
+            merged[-1][2] = min(merged[-1][2], b[2])
+            merged[-1][3] = max(merged[-1][3], b[3])
+        else:
+            merged.append(list(b))
+    return merged
+
+
+def _kkl_crop_glyph(bw: np.ndarray, box: list[int]) -> np.ndarray:
+    x0, x1, y0, y1 = box
+    sub = bw[y0:y1 + 1, x0:x1 + 1]
+    return cv2.resize(sub, _KKL_TEMPLATE_SIZE, interpolation=cv2.INTER_NEAREST)
+
+
+def _kkl_classify_glyph(glyph: np.ndarray, templates: dict[str, list[np.ndarray]],
+                         threshold: float = 0.15) -> str | None:
+    best_ch, best_score = None, 1e9
+    for ch, temps in templates.items():
+        for t in temps:
+            diff = np.abs(glyph.astype(int) - t.astype(int)).mean() / 255.0
+            if diff < best_score:
+                best_score, best_ch = diff, ch
+    return best_ch if best_score <= threshold else None
+
+
+def _kkl_ocr_single_glyph(bw: np.ndarray, box: list[int]) -> str | None:
+    """Fallback for a glyph the template library doesn't recognise --
+    isolating a single character and constraining Tesseract to a tight
+    whitelist is far more reliable than whole-string OCR, which is what
+    the primary pipeline (extract_observation_time) already does and
+    already struggles with on this font."""
+    if pytesseract is None:
+        return None
+    x0, x1, y0, y1 = box
+    crop = bw[y0:y1 + 1, x0:x1 + 1]
+    padded = cv2.copyMakeBorder(crop, 20, 20, 20, 20, cv2.BORDER_CONSTANT, value=255)
+    text = pytesseract.image_to_string(
+        padded, config="--psm 10 -c tessedit_char_whitelist=0123456789"
+    ).strip()
+    return text if len(text) == 1 and text.isdigit() else None
+
+
+def extract_kkl_time_via_templates(img: Image.Image) -> tuple[int, int, int] | None:
+    """Reads just the (H, M, S) from Karaikal's bold 'HH:MM:SSZ' line via
+    template matching (see the block comment above). Deliberately doesn't
+    attempt the date line too -- poll_and_decode already has a perfectly
+    good, much simpler source of the date (today's UTC date, corrected for
+    the rare case where local midnight fell between the frame being
+    printed and this poll picking it up), and decoding this font's date
+    line reliably would need letter templates for the month abbreviation,
+    which is a lot more segmentation work for something we don't need.
+    Returns None (safe fall-back to poll-receipt time) on any ambiguity."""
+    crop = img.convert("RGB").crop(PRODUCTS["kkl_maxz"]["timestamp_bbox"])
+    arr = np.array(crop)
+    big = cv2.resize(arr, (arr.shape[1] * 5, arr.shape[0] * 5), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(big, cv2.COLOR_RGB2GRAY)
+    _, bw_full = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY)
+    bw = bw_full[: int(bw_full.shape[0] * 0.5), :]  # top line only ("HH:MM:SSZ")
+
+    groups = _kkl_char_groups(bw)
+    if len(groups) != 9:  # "HH:MM:SSZ" is always exactly 9 glyphs
+        return None
+
+    templates = _load_kkl_timestamp_templates()
+    chars = []
+    for box in groups:
+        glyph = _kkl_crop_glyph(bw, box)
+        ch = _kkl_classify_glyph(glyph, templates)
+        if ch is None:
+            ch = _kkl_ocr_single_glyph(bw, box)
+        if ch is None:
+            return None
+        chars.append(ch)
+
+    expected_shape = "dd:dd:ddZ"
+    text = "".join(chars)
+    for c, kind in zip(text, expected_shape):
+        if kind == "d" and not c.isdigit():
+            return None
+        if kind == "Z" and c != "Z":
+            return None
+        if kind == ":" and c != ":":
+            return None
+    try:
+        h, m, s = int(text[0:2]), int(text[3:5]), int(text[6:8])
+        datetime(2000, 1, 1, h, m, s)  # validates ranges, raises ValueError if bogus
+    except ValueError:
+        return None
+    return h, m, s
+
+
 # === CELL 8 (OCR) ===
 def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     """Two IMD timestamp layouts are in play here: NIOT prints
@@ -338,9 +492,29 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     and 'DD Mon YYYY UTC' on two separate lines, in a bold font that OCRs
     noticeably worse at Karaikal's ~880x720 resolution than NIOT's
     full-resolution frames do (spot check: a stray digit or two gets
-    misread often enough to matter). Both patterns are tried; a miss
-    falls back to poll-receipt time same as always, so this never blocks
-    the pipeline, just loses timestamp precision for that frame."""
+    misread often enough to matter). Karaikal is tried first via
+    extract_kkl_time_via_templates (far more reliable on this font, see
+    that function's comment); this OCR path remains the primary route for
+    NIOT and the fallback for Karaikal if template matching can't
+    confidently read a frame. A miss falls back to poll-receipt time same
+    as always, so this never blocks the pipeline, just loses timestamp
+    precision for that frame."""
+    if product == "kkl_maxz":
+        hms = extract_kkl_time_via_templates(img)
+        if hms is not None:
+            h, m, s = hms
+            now_utc = datetime.now(timezone.utc)
+            dt = now_utc.replace(hour=h, minute=m, second=s, microsecond=0)
+            # Day-rollover guard: the frame's printed time can be on the
+            # other side of UTC midnight from "now" if this poll landed
+            # just after midnight for a frame stamped just before it (or
+            # vice versa) -- pick whichever of {yesterday, today,
+            # tomorrow}'s calendar date puts the frame time closest to now,
+            # capped well under 24h so this never drifts onto the wrong day.
+            candidates = [dt + timedelta(days=d) for d in (-1, 0, 1)]
+            dt = min(candidates, key=lambda c: abs((c - now_utc).total_seconds()))
+            return dt
+
     if pytesseract is None:
         return None
     crop = img.convert("RGB").crop(PRODUCTS[product]["timestamp_bbox"])
