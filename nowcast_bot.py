@@ -281,7 +281,7 @@ ELEVATED_BEAM_THRESHOLD_KM = 1.5
 # map -- see build_autorefresh_script(). Deliberately not exactly 15 (the
 # upload cadence, see nowcast.yml/cron-job.org) so a reload rarely lands
 # on exactly the same moment as an in-progress upload every single cycle.
-AUTOREFRESH_MINUTES = 16
+AUTOREFRESH_MINUTES = 20
 
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
