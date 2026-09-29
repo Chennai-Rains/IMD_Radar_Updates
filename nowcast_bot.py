@@ -277,6 +277,12 @@ CLUSTER_RADIUS_KM = 15.0
 # not representative of near-surface rain, only of a tall/mature system.
 ELEVATED_BEAM_THRESHOLD_KM = 1.5
 
+# How often an already-open browser tab reloads itself to pick up a newer
+# map -- see build_autorefresh_script(). Deliberately not exactly 15 (the
+# upload cadence, see nowcast.yml/cron-job.org) so a reload rarely lands
+# on exactly the same moment as an in-progress upload every single cycle.
+AUTOREFRESH_MINUTES = 16
+
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
     """Which physical radar a product belongs to (see RADAR_SITES /
@@ -1226,9 +1232,44 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
         </div>
         <div style="margin-bottom: 4px;">{times_html}</div>
         <div style="font-size: 10px; color: #666;">
-            Based on IMD radar imagery. Not an official forecast.
+            Based on IMD radar imagery. Not an official forecast.<br>
+            Auto-refreshes every {AUTOREFRESH_MINUTES} min.
         </div>
     </div>
+    """
+
+
+def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES) -> str:
+    """This is a static HTML file re-uploaded on a schedule -- a browser
+    tab left open on it otherwise just sits on whatever was live at the
+    moment it was opened, with no way to know a newer map has since been
+    published. A plain timed reload fixes that for anyone who leaves the
+    page open; the schedule (nowcast.yml -> cron-job.org, see that
+    workflow's comments) already keeps the live file itself fresh every
+    ~15 min, this just makes sure an already-open tab actually picks that
+    up instead of going stale in the background.
+
+    Deliberately a plain JS reload, not a <meta http-equiv="refresh">:
+    the meta-refresh timer is anchored to when the browser PARSED the
+    page, which can lag noticeably behind when the tab actually became
+    visible to the reader (e.g. a page pre-loaded in a background tab);
+    this script's timer starts from the same moment, but since it's easy
+    to swap for a visibility-aware version later (only start counting
+    once the tab is actually visible) if that ever turns out to matter,
+    plain JS is kept here as the more extensible starting point.
+
+    interval_minutes is deliberately NOT the same 15 as the upload cron --
+    a little offset (see AUTOREFRESH_MINUTES) means a reload landing
+    exactly mid-upload (this repo's FTP step isn't atomic -- see
+    nowcast.yml) is rare rather than a fixed date with every single
+    upload; if it ever does land mid-transfer, the NEXT reload a few
+    minutes later self-heals it, same as any other transient fetch
+    hiccup on this site."""
+    interval_ms = interval_minutes * 60 * 1000
+    return f"""
+    <script>
+        setTimeout(function() {{ window.location.reload(); }}, {interval_ms});
+    </script>
     """
 
 
@@ -1417,6 +1458,7 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
         m.get_root().html.add_child(folium.Element(build_fallback_logo_html()))
 
     m.get_root().html.add_child(folium.Element(build_watermark_html()))
+    m.get_root().script.add_child(folium.Element(build_autorefresh_script()))
 
     if out_html:
         m.save(out_html)
