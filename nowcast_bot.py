@@ -876,6 +876,17 @@ MAX_PLAUSIBLE_CELL_SPEED_KMH = 60.0
 
 def track_cells(prev_cells: list[Cell], new_cells: list[Cell], dt_minutes: float,
                  max_match_km: float = 15.0) -> list[Cell]:
+    """Matches each new cell to its most likely predecessor (nearest
+    centroid, same product) purely to label intensity trend
+    (intensifying/weakening/steady). Motion (velocity_kmh) is NOT computed
+    here any more -- centroid-to-centroid displacement is a single-point
+    summary of a whole storm's shape, and gets actively worse as more
+    radars/cells are added (a segmented blob splitting, merging or being
+    matched to the wrong neighbour between polls all produce a spurious
+    "jump" and therefore a spurious bearing/speed). velocity_kmh is instead
+    set by poll_and_decode from dense optical flow over the whole
+    reflectivity field (see compute_optical_flow / sample_cell_velocity_from_flow)
+    before this function runs, and is left untouched here."""
     if not prev_cells:
         return new_cells
     used_prev = set()
@@ -889,21 +900,9 @@ def track_cells(prev_cells: list[Cell], new_cells: list[Cell], dt_minutes: float
                 best_dist, best = d, pc
         if best and best_dist <= max_match_km:
             used_prev.add(best.id)
-            dlat = nc.centroid_latlon[0] - best.centroid_latlon[0]
-            dlon = nc.centroid_latlon[1] - best.centroid_latlon[1]
-            dist_km = _haversine_km(best.centroid_latlon, nc.centroid_latlon)
-            speed_kmh = dist_km / (dt_minutes / 60.0) if dt_minutes > 0 else 0
             nc.trend = ("intensifying" if nc.max_dbz > best.max_dbz + 3
                         else "weakening" if nc.max_dbz < best.max_dbz - 3
                         else "steady")
-            if speed_kmh > MAX_PLAUSIBLE_CELL_SPEED_KMH:
-                print(f"[track] {nc.product}: dropping implausible speed "
-                      f"{speed_kmh:.0f} km/h (dist={dist_km:.1f} km, dt={dt_minutes:.2f} min) "
-                      f"-- treating as no reliable velocity yet")
-                nc.velocity_kmh = None
-            else:
-                bearing = np.degrees(np.arctan2(dlon, dlat)) % 360
-                nc.velocity_kmh = (round(speed_kmh, 1), round(bearing, 0))
     return new_cells
 
 
@@ -1648,6 +1647,116 @@ def _obs_time_from_archive_filename(path: Path) -> "datetime | None":
         return None  # epoch-int fallback name -- no reliable obs_time to recover
 
 
+def _load_previous_dbz_for_flow(product: str) -> np.ndarray | None:
+    """Load and decode the most recently archived frame for `product`
+    (BEFORE this cycle's new frame gets saved into the same archive --
+    caller must call this first) so compute_optical_flow has something to
+    diff the new frame against. Returns None if there's no prior frame yet
+    (first-ever run for this product) or if the archived file fails to
+    open/decode for any reason -- optical flow is simply skipped for this
+    cycle in that case, same as "no prior track" already does elsewhere."""
+    existing = sorted(ARCHIVE_DIR.glob(f"{product}_*.gif"))
+    if not existing:
+        return None
+    try:
+        img = Image.open(existing[-1])
+        img.load()
+        lut = build_lut_from_colorbar(img, product)
+        return decode_reflectivity(img, product, lut)
+    except Exception as e:
+        print(f"[flow] {product}: couldn't decode previous archived frame "
+              f"{existing[-1]} for optical flow, skipping this cycle: {e}")
+        return None
+
+
+def compute_optical_flow(prev_dbz: np.ndarray, curr_dbz: np.ndarray,
+                          product: str) -> np.ndarray | None:
+    """Dense optical flow (Farneback) between two consecutive dBZ arrays of
+    the SAME radar/product, as a more robust alternative to matching
+    discrete segmented cells' centroids across frames (see track_cells'
+    docstring for why centroid-matching gets noisier as more radars/cells
+    are added). Operating on the whole reflectivity field instead of a
+    handful of blob centroids means a storm splitting, merging, or
+    reforming between polls no longer produces a spurious "jump" -- the
+    flow field just tracks how the pattern as a whole shifted.
+
+    Returns a (H, W, 2) array of per-pixel (dx, dy) pixel displacement, or
+    None if the two frames don't even have matching shapes (e.g. a
+    resolution/crop change) -- that's treated the same as "no prior frame"
+    upstream: flow-based velocity is simply skipped for this cycle."""
+    if prev_dbz.shape != curr_dbz.shape:
+        print(f"[flow] {product}: shape mismatch {prev_dbz.shape} vs "
+              f"{curr_dbz.shape}, skipping optical flow this cycle")
+        return None
+
+    vmin, vmax = product_value_range(product)
+    span = (vmax - vmin) or 1.0
+
+    def to_gray(dbz: np.ndarray) -> np.ndarray:
+        # NaN (no-echo/background) pixels read as the scale's floor value --
+        # they still carry real information for flow (clear-air boundaries
+        # move too), and this keeps them numerically well-behaved instead of
+        # propagating NaN into calcOpticalFlowFarneback.
+        filled = np.nan_to_num(dbz, nan=vmin)
+        clipped = np.clip(filled, vmin, vmax)
+        return (((clipped - vmin) / span) * 255.0).astype(np.uint8)
+
+    prev_gray = to_gray(prev_dbz)
+    curr_gray = to_gray(curr_dbz)
+    flow = cv2.calcOpticalFlowFarneback(
+        prev_gray, curr_gray, None,
+        pyr_scale=0.5, levels=3, winsize=25, iterations=3,
+        poly_n=5, poly_sigma=1.2, flags=0,
+    )
+    return flow
+
+
+def sample_cell_velocity_from_flow(flow: np.ndarray, cell: Cell, dt_minutes: float,
+                                    product: str,
+                                    sample_radius_px: int = 3) -> tuple[float, float] | None:
+    """Read this cell's motion off the optical-flow field at its own pixel
+    location, rather than off a centroid difference against a (possibly
+    mismatched) cell from the previous cycle. Median over a small
+    neighbourhood (not just the single nearest pixel) for robustness against
+    per-pixel flow noise -- same spirit as cluster_cells' density-weighted
+    centroid, just applied to a vector field instead of a point.
+
+    Returns (speed_kmh, bearing_deg) rounded the same way the old centroid
+    based calculation did, or None if dt_minutes isn't usable or the
+    resulting speed still fails the MAX_PLAUSIBLE_CELL_SPEED_KMH sanity
+    check (kept as a second line of defense here too, same reasoning as
+    before -- a bad flow estimate should mean "no cone", never "a cone
+    that's obviously wrong")."""
+    if dt_minutes <= 0:
+        return None
+    h, w = flow.shape[:2]
+    cy, cx = int(round(cell.py)), int(round(cell.px))
+    y0, y1 = max(0, cy - sample_radius_px), min(h, cy + sample_radius_px + 1)
+    x0, x1 = max(0, cx - sample_radius_px), min(w, cx + sample_radius_px + 1)
+    if y0 >= y1 or x0 >= x1:
+        return None
+    patch = flow[y0:y1, x0:x1]
+    dx = float(np.median(patch[..., 0]))
+    dy = float(np.median(patch[..., 1]))
+
+    km_per_px = PRODUCTS[product]["km_per_px"]
+    # Same sign convention as pixel_to_latlon: increasing py = moving south,
+    # increasing px = moving east.
+    km_east = dx / km_per_px
+    km_north = -dy / km_per_px
+    dist_km = (km_east ** 2 + km_north ** 2) ** 0.5
+    speed_kmh = dist_km / (dt_minutes / 60.0)
+
+    if speed_kmh > MAX_PLAUSIBLE_CELL_SPEED_KMH:
+        print(f"[flow] {product}: dropping implausible flow-based speed "
+              f"{speed_kmh:.0f} km/h for cell {cell.id} -- treating as no "
+              f"reliable velocity yet")
+        return None
+
+    bearing = np.degrees(np.arctan2(km_east, km_north)) % 360
+    return (round(speed_kmh, 1), round(bearing, 0))
+
+
 def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: dict,
                      last_obs_time_seen: dict) -> np.ndarray | None:
     """One polling cycle for `product`, adapted from the notebook's
@@ -1707,6 +1816,11 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
         print(f"[poll] {product}: no new frame yet (obs_time={obs_time})")
         return dbz  # still return it -- same content as last time, fine to (re)draw
 
+    # Must happen BEFORE this cycle's new frame is archived below -- this is
+    # looking for whatever was already the most recent archived frame going
+    # into this cycle, i.e. the "previous" half of the optical-flow pair.
+    prev_dbz_for_flow = _load_previous_dbz_for_flow(product)
+
     now = time.time()
     pstate["last_new_frame_ts"] = now
     pstate["last_obs_time"] = obs_time.isoformat() if obs_time else None
@@ -1740,6 +1854,18 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     obs_time_effective = obs_time or datetime.now(timezone.utc)
     dt_minutes = ((obs_time_effective - prev_obs_time[product]).total_seconds() / 60.0
                   if prev_obs_time[product] else 0)
+
+    # Motion first, via optical flow over the whole reflectivity field
+    # (falls back to leaving velocity_kmh at its dataclass default of None
+    # when there's no usable previous frame yet -- e.g. the very first run
+    # for this product, or a shape mismatch) -- then matching/trend-only
+    # tracking. See track_cells' docstring for why these are now split.
+    flow = (compute_optical_flow(prev_dbz_for_flow, dbz, product)
+            if prev_dbz_for_flow is not None and dt_minutes > 0 else None)
+    if flow is not None:
+        for c in new_cells:
+            c.velocity_kmh = sample_cell_velocity_from_flow(flow, c, dt_minutes, product)
+
     tracked = track_cells(prev_cells[product], new_cells, dt_minutes)
 
     prev_cells[product] = tracked
