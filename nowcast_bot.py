@@ -1264,13 +1264,25 @@ def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES) -> str
     nowcast.yml) is rare rather than a fixed date with every single
     upload; if it ever does land mid-transfer, the NEXT reload a few
     minutes later self-heals it, same as any other transient fetch
-    hiccup on this site."""
+    hiccup on this site.
+
+    Returns BARE JavaScript, deliberately with no <script> tags of its
+    own -- this is added via m.get_root().script.add_child(...), and
+    branca's Figure template already wraps everything under .script in
+    ONE shared <script>...</script> for the whole page (same convention
+    every folium element's own script macro follows, e.g. Marker's).
+    Wrapping this snippet in its own nested <script>/</script> (as an
+    earlier version of this function did) inserts a literal '</script>'
+    into the middle of that already-open tag -- browsers don't parse
+    nested script elements, so that closes the shared script block right
+    there, silently killing every statement after it INCLUDING Leaflet's
+    own map/tile-layer/marker init code that folium adds the same way.
+    That's a real regression this function caused once already: it broke
+    the whole map (blank page, only the plain-HTML overlays like the
+    banner/legend/watermark still rendered, since those go through
+    .html, not .script) while looking completely fine in isolation."""
     interval_ms = interval_minutes * 60 * 1000
-    return f"""
-    <script>
-        setTimeout(function() {{ window.location.reload(); }}, {interval_ms});
-    </script>
-    """
+    return f"setTimeout(function() {{ window.location.reload(); }}, {interval_ms});"
 
 
 def build_fallback_logo_html() -> str:
