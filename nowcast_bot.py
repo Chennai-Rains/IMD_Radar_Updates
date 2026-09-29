@@ -91,8 +91,22 @@ RADAR_SITES = {
                                    # DWRs are typically S-band, not confirmed
     },
     "kochi": {
-        "site_lat": 10.43,        # measured from the frame's own lat/lon
-        "site_lon": 76.26,        # axis + range-ring geometry (see above)
+        # CORRECTED — the image-based fit below (site_px + the axis
+        # mapping) originally landed on 10.43N, off from the true site by
+        # almost exactly one 0.5-degree gridline (~55km) north. Root
+        # cause: the gridline-peak scan used to build the lat axis mapping
+        # only covered y=100:900 of the frame and its first detected peak
+        # (y=455) was mislabeled as the 11.5N line -- it's actually the
+        # 11.0N line, since 12.0N (y=322) and 11.5N (y=389) both sit in
+        # the cross-section-strip region above the plan-view panel
+        # (y<300) and were never in that peak list to begin with. Fixed
+        # values below are the site's real public coordinates (Palluruthy,
+        # West Kochi) -- re-deriving them from the corrected axis mapping
+        # against the ORIGINAL (unchanged) site_px lands within ~0.3km of
+        # these, confirming site_px itself was fine all along and only
+        # this lat conversion was off.
+        "site_lat": 9.9264,
+        "site_lon": 76.2621,
         "site_elev_m": 5.0,       # UNVERIFIED — coastal-site guess, same
                                    # basis as Karaikal's
         "band": "S",               # UNVERIFIED — same basis as Karaikal's
