@@ -1,19 +1,30 @@
 name: Update nowcast radar map
 
 on:
-  schedule:
-    # Every 15 minutes. GitHub Actions doesn't guarantee this fires at
-    # exactly :00/:15/:30/:45 -- under load it can slip by a few minutes,
-    # which is fine here since the radars themselves only refresh every
-    # ~10 minutes anyway.
-    - cron: "*/15 * * * *"
+  # No native `schedule:` trigger here -- GitHub's own cron for a 15-minute
+  # interval turned out to be unreliable in practice (real gaps of several
+  # hours between fires, see git history around 2026-09-29), so an external
+  # pinger (cron-job.org) now calls this workflow's `workflow_dispatch` API
+  # endpoint every 15 minutes instead -- see README for the setup. Keeping
+  # BOTH triggers active was tried first ("harmless redundant backup"), but
+  # that turned out to be an active liability: the two independent 15-min
+  # schedules would occasionally fire only a couple of minutes apart, and
+  # that tighter-than-normal gap between polls was the direct cause of a
+  # real bug (a storm cell briefly showing an impossible ~1560 km/h speed --
+  # see track_cells' MAX_PLAUSIBLE_CELL_SPEED_KMH / poll_and_decode's
+  # content-hash is_new_frame comment in nowcast_bot.py for the full story).
+  # That specific failure mode is now fixed defensively either way, but
+  # there's no upside left to firing this from two independent schedulers,
+  # so the unreliable one is simply removed.
   workflow_dispatch: {}
     # Lets you trigger a run manually from the Actions tab any time you
-    # want to test a change without waiting for the next scheduled tick.
+    # want to test a change without waiting for the external pinger's next
+    # tick -- and is also what the external cron-job.org pinger calls.
 
-# Only one run at a time -- a 15-minute cron shouldn't normally overlap,
-# but this is cheap insurance against two runs racing to commit/push state
-# at once if a run ever takes longer than expected.
+# Only one run at a time -- the external 15-minute pinger shouldn't
+# normally overlap itself, but this is cheap insurance against two runs
+# racing to commit/push state at once if a run ever takes longer than
+# expected.
 concurrency:
   group: nowcast-pipeline
   cancel-in-progress: false
