@@ -53,6 +53,34 @@ RADAR_META = {
 #     the kind of thing that caused NIOT's original SE-offset bug — check
 #     the merged map against known towns (Karaikal, Nagapattinam,
 #     Puducherry) before trusting absolute storm positions from this radar.
+
+# --- Third radar: IMD's Kochi DWR, added to extend coverage up the Kerala
+# coast (west coast, unlike NIOT/Karaikal's east coast). Unlike Karaikal,
+# Kochi's own frame prints an explicit lat/lon axis (tick labels "74"-"78"
+# along the bottom, "8.0"-"12.0" along the left) directly on the plot, so
+# site_lat/site_lon/km_per_px here were derived from THAT axis rather than
+# guessed from the town's public coordinates:
+#   1. Degree-gridline pixel positions were measured two independent ways —
+#      OCR'd tick label bounding boxes, and a plain brightness-peak scan
+#      for the actual gridlines over a pure-ocean strip (no text/coastline
+#      to confuse it) — and agreed to within ~1px on both axes.
+#   2. That gives an affine pixel<->lat/lon mapping directly from the
+#      image itself (pixel_per_deg_lat=134, pixel_per_deg_lon=131, whose
+#      ratio matches cos(10.43 deg)=0.983 almost exactly -- confirms this
+#      is a properly isotropic-km projection, not just a plain square
+#      degree grid, so the existing single-km_per_px pixel_to_latlon
+#      formula applies here too).
+#   3. The radar's own site pixel was found from the concentric dashed
+#      range-ring geometry itself (RANSAC circle fit over the dashed-only
+#      mask, after stripping the solid gridlines): two independent rings
+#      agreed on the same center to within 0.3px (and were in an exact
+#      2:1 radius ratio, a strong internal-consistency check). That pixel,
+#      run back through the same axis mapping, gives site_lat/site_lon —
+#      so unlike Karaikal, these are MEASURED from the image's own
+#      geometry, not a guessed town center. Still worth a sanity check
+#      against the merged map once real frames start flowing (the fitted
+#      site sits just offshore right next to the "KOC" station-code label,
+#      which matches expectations for a coastal DWR).
 RADAR_SITES = {
     "niot": RADAR_META,
     "karaikal": {
@@ -62,11 +90,19 @@ RADAR_SITES = {
         "band": "S",              # UNVERIFIED — IMD's ~2015-era coastal
                                    # DWRs are typically S-band, not confirmed
     },
+    "kochi": {
+        "site_lat": 10.43,        # measured from the frame's own lat/lon
+        "site_lon": 76.26,        # axis + range-ring geometry (see above)
+        "site_elev_m": 5.0,       # UNVERIFIED — coastal-site guess, same
+                                   # basis as Karaikal's
+        "band": "S",               # UNVERIFIED — same basis as Karaikal's
+    },
 }
 
 PRODUCT_RADAR = {
     "ppi": "niot", "maxz": "niot", "ppz": "niot",
     "kkl_ppi": "karaikal", "kkl_ppz": "karaikal", "kkl_maxz": "karaikal",
+    "koc_maxz": "kochi",
 }
 
 EFFECTIVE_EARTH_RADIUS_KM = 8494.0  # standard 4/3-Earth-radius model
@@ -251,6 +287,45 @@ PRODUCTS = {
             (247, 243, 273, 260), (67, 347, 93, 364), (427, 347, 453, 364),
             (67, 556, 93, 573), (427, 556, 453, 573), (247, 660, 273, 677),
         ],
+    },
+
+    # --- Kochi DWR (see calibration-status comment above RADAR_SITES) ---
+    "koc_maxz": {
+        "url": "https://mausam.imd.gov.in/Radar/caz_koc.gif",
+        "role": "aloft_early_warning",
+        "range_km": 250.0,
+        "elevation_deg": None,   # column-max, not a single tilt -- same as
+                                  # every other MAXZ product here
+        "image_size": (1000, 1000),
+        # Same "Max with panels" layout as kkl_maxz (cross-section strips
+        # across the top and down the right, plan-view confined to the
+        # bottom-left), but at yet another resolution/crop -- measured
+        # directly from a real caz_koc.gif frame (see calibration-status
+        # comment above RADAR_SITES for how site_px/km_per_px were derived
+        # from this radar's own printed lat/lon axis + range-ring geometry,
+        # rather than guessed).
+        "site_px": (397.5, 598.5),
+        "km_per_px": 1.2072,
+        "colorbar_bbox": (921, 301, 940, 900),
+        "value_at_top": 60.0,     # same uniform scale as kkl_maxz/kkl_ppz
+        "value_at_bottom": 20.0,
+        # "Date:DD/MM/YYYY" on one line, "Time:HH:MM:SS UTC" on the next --
+        # a third timestamp layout, see extract_observation_time's new
+        # "Date:"/"Time:" branch. Plain OCR reads this cleanly (a normal
+        # digital font, not Karaikal's bold small font that needed template
+        # matching), so no special per-glyph path is needed here.
+        "timestamp_bbox": (700, 155, 915, 215),
+        "elevation_bbox": None,  # no elevation line — column-max product
+        # Plan-view quadrant only, excluding the top cross-section strip,
+        # the right per-azimuth strip, and the colorbar -- bounds measured
+        # from the frame's own panel border pixels.
+        "plot_bbox": (100, 300, 700, 900),
+        "cell_dbz_threshold": 35,   # matches every other MAXZ product here
+        # No printed numeric range-ring labels found within the plan-view
+        # crop for this layout (unlike NIOT/Karaikal, which print "XX km"
+        # boxes directly on the rings) -- this radar's georeferencing comes
+        # from the lat/lon axis instead, so there's nothing here that needs
+        # excluding the way label_exclude_boxes does for the other radars.
     },
 }
 
@@ -534,18 +609,28 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     _, bw = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY)
     text = pytesseract.image_to_string(bw, config="--psm 6")
 
-    m = re.search(r"(\d{2}:\d{2}:\d{2})\s*UTC\s*/\s*(\d{1,2}\s+\w{3}\s+\d{4})", text)
+    # Kochi's layout is a third one: "Date:DD/MM/YYYY" and "Time:HH:MM:SS
+    # UTC" on two separate lines (numeric month, unlike NIOT/Karaikal's
+    # abbreviated-month text) -- tried first since its "Date:"/"Time:"
+    # keywords are distinctive enough not to collide with the other two
+    # patterns.
+    m = re.search(r"Date:\s*(\d{1,2}/\d{1,2}/\d{4}).*?Time:\s*(\d{2}:\d{2}:\d{2})\s*UTC",
+                   text, re.DOTALL)
     if m:
-        date_str, time_str = m.group(2), m.group(1)
+        date_str, time_str, date_fmt = m.group(1), m.group(2), "%d/%m/%Y"
     else:
-        m = re.search(r"(\d{2}:\d{2}:\d{2})\s*Z?.*?(\d{1,2}\s+\w{3}\s+\d{4})\s*UTC",
-                       text, re.DOTALL)
-        if not m:
-            return None
-        date_str, time_str = m.group(2), m.group(1)
+        m = re.search(r"(\d{2}:\d{2}:\d{2})\s*UTC\s*/\s*(\d{1,2}\s+\w{3}\s+\d{4})", text)
+        if m:
+            date_str, time_str, date_fmt = m.group(2), m.group(1), "%d %b %Y"
+        else:
+            m = re.search(r"(\d{2}:\d{2}:\d{2})\s*Z?.*?(\d{1,2}\s+\w{3}\s+\d{4})\s*UTC",
+                           text, re.DOTALL)
+            if not m:
+                return None
+            date_str, time_str, date_fmt = m.group(2), m.group(1), "%d %b %Y"
 
     try:
-        dt = datetime.strptime(f"{date_str} {time_str}", "%d %b %Y %H:%M:%S")
+        dt = datetime.strptime(f"{date_str} {time_str}", f"{date_fmt} %H:%M:%S")
     except ValueError:
         return None
     dt = dt.replace(tzinfo=timezone.utc)
@@ -760,6 +845,21 @@ def extract_cells(dbz: np.ndarray, product: str, elevation_deg: float | None,
         cy, cx = ys.mean(), xs.mean()
         latlon = pixel_to_latlon(cx + ox, cy + oy, product)
         rng_km = range_from_site_km(latlon, product)
+        # A real radar never plots real echo beyond its own stated maximum
+        # range -- a blob whose centroid falls past that (a little slack
+        # for rounding/pixel noise near the edge) isn't a storm, it's a
+        # stray color match against some non-echo graphic element (a
+        # gridline, a boundary anti-alias edge, label text) landing within
+        # DIST_THRESHOLD of a LUT color by coincidence. First caught on
+        # koc_maxz, whose plan-view crop is a square that reaches well
+        # past its 250km range circle at the corners (its plot draws full-
+        # panel lat/lon gridlines rather than the range-ring style NIOT/
+        # Karaikal use, and this radar's LUT happens to have a pale
+        # yellow-white band a near-white gridline pixel can land within 2
+        # units of) -- but the check is generic and applies to every
+        # product, not just Kochi, as cheap extra insurance everywhere.
+        if rng_km > cfg["range_km"] * 1.05:
+            continue
         if elevation_deg is not None:
             beam_h = compute_beam_height_km(rng_km, elevation_deg,
                                              site_for(product)["site_elev_m"])
@@ -968,9 +1068,11 @@ PRODUCT_STYLE = {
     "kkl_ppi": {"color": "#9467bd", "label": "Karaikal PPI - surface confirmed"},
     "kkl_ppz": {"color": "#17becf", "label": "Karaikal PPZ - regional awareness"},
     "kkl_maxz": {"color": "#8c564b", "label": "Karaikal MAXZ - aloft / building"},
+    "koc_maxz": {"color": "#2ca02c", "label": "Kochi MAXZ - aloft / building"},
 }
 
-RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR"}
+RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR",
+                       "kochi": "Kochi DWR"}
 
 # CARTO now requires an API key even for the free Voyager basemap tiles.
 # NOTE: this key travels in the tile URL itself, so it's visible to anyone
@@ -1554,7 +1656,7 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 
 # Only archive frames for the products this pipeline actually polls, so the
 # repo doesn't accumulate PPI/PPZ frames for products we never fetch here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz")
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "koc_maxz")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
