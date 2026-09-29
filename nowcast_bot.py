@@ -1394,6 +1394,19 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     zoom = 9 if len(radars_shown) == 1 else 7
     m = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=CARTO_VOYAGER_URL, attr=CARTO_ATTR, name="CARTO Voyager").add_to(m)
+    # Every shape with a tooltip/popup (every cell marker, every forecast
+    # cone) gets a tabindex from Leaflet for keyboard-accessibility, and
+    # browsers draw their own default focus outline on click/hover -- a
+    # plain black rectangle around that SHAPE'S BOUNDING BOX, not its
+    # actual outline -- which is exactly the "black box on every cone"
+    # reported: it's a browser default, unrelated to FORECAST_STYLE's
+    # actual (orange/red) polygon colors. Suppressing just the outline,
+    # not the tabindex itself, keeps the shapes keyboard-focusable (so a
+    # screen reader / keyboard user can still tab to each tooltip) while
+    # dropping only the visual artifact.
+    m.get_root().header.add_child(folium.Element(
+        "<style>.leaflet-interactive:focus { outline: none; }</style>"
+    ))
 
     for r in radars_shown:
         site = RADAR_SITES[r]
