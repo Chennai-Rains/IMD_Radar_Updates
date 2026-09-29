@@ -72,21 +72,32 @@ jobs:
           commit_user_name: "nowcast-bot"
           commit_user_email: "actions@users.noreply.github.com"
 
-      - name: Upload storm_forecast_map.html to plots.chennairains.com
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_HOST }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: 21
-          # cPanel's FTP Accounts page for this account explicitly offers
-          # "FTP & explicit FTPS" on port 21 -- explicit FTPS negotiates
-          # TLS over the same plain-FTP port (STARTTLS-style), so this is
-          # both more secure than plain FTP and matches what the host
-          # actually advertises supporting.
-          protocol: ftps
-          local-dir: ./output/
-          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
-          # Never delete anything already sitting in that remote folder --
-          # this only ever adds/overwrites storm_forecast_map.html.
-          dangerous-clean-slate: false
+      - name: Upload storm_forecast_map.html to plots.chennairains.com (atomic swap)
+        # Not FTP-Deploy-Action: it overwrites the live filename directly via
+        # STOR (a multi-MB file, since folium base64-embeds the raster
+        # overlay PNGs into the HTML), so the plain rewrite takes long enough
+        # over FTP that a visitor hitting the URL mid-upload can get a broken
+        # or missing response. This bot redeploys roughly every 15 minutes,
+        # so that exposure window recurs constantly rather than twice a day.
+        # Fix: upload to a throwaway name, then rename it into place only
+        # once the transfer is fully complete -- the live filename always
+        # points at a complete file (old or new), and the rename itself is
+        # effectively instant.
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          sudo apt-get install -y lftp
+          lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
+            set ftp:ssl-force true;
+            set ftp:ssl-protect-data true;
+            set ssl:verify-certificate no;
+            set ftp:passive-mode true;
+            cd $FTP_REMOTE_DIR;
+            put output/storm_forecast_map.html -o storm_forecast_map.uploading.html;
+            rm -f storm_forecast_map.html;
+            mv storm_forecast_map.uploading.html storm_forecast_map.html;
+            bye
+          " "$FTP_HOST"
