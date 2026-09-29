@@ -1,5 +1,6 @@
 # === CELL 2 (imports) ===
 import base64
+import hashlib
 import io
 import json
 import re
@@ -852,6 +853,19 @@ def cluster_cells(cells: list[Cell], cluster_radius_km: float = CLUSTER_RADIUS_K
     return merged
 
 
+# Even a genuinely fast-moving convective cell essentially never exceeds
+# this -- a computed speed above it is a red flag that dt_minutes was
+# spuriously tiny (e.g. a re-served/unchanged frame mistaken for a new
+# one, or two polls landing close together), not that a storm is real.
+# See the reported "1564 km/h" cone: root-caused to poll_and_decode's old
+# is_new_frame check treating every Karaikal OCR failure as a new frame
+# regardless of whether the underlying image had actually changed, which
+# it's fixed at the source now (content-hash based), but this is kept as
+# a second line of defense against any other way a near-zero dt sneaks
+# through -- physically-impossible speeds get dropped rather than shown.
+MAX_PLAUSIBLE_CELL_SPEED_KMH = 200.0
+
+
 def track_cells(prev_cells: list[Cell], new_cells: list[Cell], dt_minutes: float,
                  max_match_km: float = 15.0) -> list[Cell]:
     if not prev_cells:
@@ -871,11 +885,17 @@ def track_cells(prev_cells: list[Cell], new_cells: list[Cell], dt_minutes: float
             dlon = nc.centroid_latlon[1] - best.centroid_latlon[1]
             dist_km = _haversine_km(best.centroid_latlon, nc.centroid_latlon)
             speed_kmh = dist_km / (dt_minutes / 60.0) if dt_minutes > 0 else 0
-            bearing = np.degrees(np.arctan2(dlon, dlat)) % 360
-            nc.velocity_kmh = (round(speed_kmh, 1), round(bearing, 0))
             nc.trend = ("intensifying" if nc.max_dbz > best.max_dbz + 3
                         else "weakening" if nc.max_dbz < best.max_dbz - 3
                         else "steady")
+            if speed_kmh > MAX_PLAUSIBLE_CELL_SPEED_KMH:
+                print(f"[track] {nc.product}: dropping implausible speed "
+                      f"{speed_kmh:.0f} km/h (dist={dist_km:.1f} km, dt={dt_minutes:.2f} min) "
+                      f"-- treating as no reliable velocity yet")
+                nc.velocity_kmh = None
+            else:
+                bearing = np.degrees(np.arctan2(dlon, dlat)) % 360
+                nc.velocity_kmh = (round(speed_kmh, 1), round(bearing, 0))
     return new_cells
 
 
@@ -1643,8 +1663,24 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     lut = build_lut_from_colorbar(img, product)
     dbz = decode_reflectivity(img, product, lut)
 
-    pstate = state.setdefault(product, {"last_obs_time": None, "last_new_frame_ts": 0})
-    is_new_frame = not (obs_time is not None and pstate.get("last_obs_time") == obs_time.isoformat())
+    pstate = state.setdefault(product, {"last_obs_time": None, "last_new_frame_ts": 0,
+                                         "last_frame_hash": None})
+    # Whether raw BYTES changed since the last poll -- not whether obs_time
+    # changed. obs_time can be None (Karaikal's OCR/template read fails
+    # noticeably more often than NIOT's, see extract_observation_time) on a
+    # perfectly ordinary re-served, UNCHANGED frame just as easily as on a
+    # genuinely new one, so it's not a safe signal for "is this new" on its
+    # own. The previous check (`obs_time is None` counted as automatically
+    # "new") fed track_cells a near-zero dt_minutes whenever two polls
+    # landed close together in wall-clock time with a Karaikal OCR miss in
+    # between -- e.g. the external cron-job.org pinger and GitHub's own
+    # (less reliable, kept as backup) schedule trigger occasionally firing
+    # only a couple of minutes apart -- which is exactly what produced a
+    # reported "1564 km/h" storm cell: not a real storm, a same-frame
+    # centroid nudge divided by an almost-zero dt. Content hash sidesteps
+    # needing obs_time for this decision at all.
+    frame_hash = hashlib.sha256(raw).hexdigest()
+    is_new_frame = frame_hash != pstate.get("last_frame_hash")
 
     if not is_new_frame:
         print(f"[poll] {product}: no new frame yet (obs_time={obs_time})")
@@ -1653,6 +1689,7 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     now = time.time()
     pstate["last_new_frame_ts"] = now
     pstate["last_obs_time"] = obs_time.isoformat() if obs_time else None
+    pstate["last_frame_hash"] = frame_hash
     tag = obs_time.strftime("%Y%m%dT%H%M%SZ") if obs_time else int(now)
     fname = ARCHIVE_DIR / f"{product}_{tag}.gif"
     fname.write_bytes(raw)
