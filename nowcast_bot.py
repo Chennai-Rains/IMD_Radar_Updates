@@ -1011,6 +1011,73 @@ def plot_bounds_latlon(product: str) -> tuple[float, float, float, float]:
     return south, west, north, east
 
 
+def _effective_obs_time(product: str) -> datetime:
+    """For freshness COMPARISON only (never shown to a viewer, never used
+    for the info banner) -- a product whose timestamp couldn't be read
+    this cycle (last_obs_time_seen is None) is treated as the oldest
+    possible frame, so it always loses an overlap to any product with a
+    genuinely known timestamp. Two unknown-timestamp products compare
+    equal, which _mask_stale_overlap treats as a tie (mask neither) --
+    there's no basis to prefer one over the other."""
+    t = _last_obs_time_seen.get(product)
+    return t if t is not None else datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) -> dict[str, np.ndarray]:
+    """When more than one radar's raster is drawn over the same map (two+
+    distinct radars in `products`), simply stacking both semi-transparent
+    rasters wherever their coverage circles overlap produces a muddy
+    double-exposure, and can leave a storm blob visibly lingering in the
+    staler radar's frame well after the fresher radar already shows it
+    having moved off -- confusing for a reader trying to judge where a
+    storm actually is right now.
+
+    Fix: in any patch of ground covered by more than one radar currently
+    being drawn, keep only the FRESHEST radar's pixels there and drop
+    (NaN out -> fully transparent, same convention dbz_array_to_png
+    already uses for "no data") every staler radar's pixels in that same
+    patch. Each radar's raster is left completely untouched outside an
+    overlap -- its own unique-coverage area always renders exactly as
+    before -- so this only ever removes a pixel a viewer could otherwise
+    see fresher data for at the same spot, never data unique to that
+    radar.
+
+    Purely a display fix: doesn't touch cell extraction, tracking, or the
+    forecast-cone fusion (`fuse=`) logic above, and runs regardless of
+    whether `fuse` is on for this call."""
+    radars_present = {PRODUCT_RADAR[p] for p in products if p in dbz_by_product}
+    if len(radars_present) < 2:
+        return dbz_by_product
+
+    masked = {p: arr.copy() for p, arr in dbz_by_product.items()}
+    for product in products:
+        if product not in masked:
+            continue
+        arr = masked[product]
+        ys, xs = np.where(~np.isnan(arr))
+        if len(xs) == 0:
+            continue
+        ox, oy = PRODUCTS[product]["plot_bbox"][0], PRODUCTS[product]["plot_bbox"][1]
+        lat, lon = pixel_to_latlon(xs + ox, ys + oy, product)
+        this_time = _effective_obs_time(product)
+
+        drop = np.zeros(len(xs), dtype=bool)
+        for other_product in products:
+            if other_product not in masked or other_product == product:
+                continue
+            if PRODUCT_RADAR[other_product] == PRODUCT_RADAR[product]:
+                continue  # same radar, e.g. two products off one site -- not an overlap case
+            if _effective_obs_time(other_product) <= this_time:
+                continue  # other isn't strictly fresher -- doesn't get to mask this one
+            other_site = site_for(other_product)
+            dist_km = _haversine_km((lat, lon), (other_site["site_lat"], other_site["site_lon"]))
+            drop |= dist_km <= PRODUCTS[other_product]["range_km"]
+
+        if drop.any():
+            arr[ys[drop], xs[drop]] = np.nan
+    return masked
+
+
 def build_dbz_legend_html(products: tuple, n_swatches: int = 8) -> str:
     """A floating color-scale legend (swatches + value ticks), the same
     idea as the mm/h bar on rain-radar apps -- so a viewer can read a
@@ -1285,13 +1352,18 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     # pipeline as build_osm_verification_map(), so the storm's real shape is
     # visible under the markers/cones instead of just a dot at its centroid.
     # Drawn directly on the map (no per-product FeatureGroup/toggle -- see
-    # the products docstring above for why).
+    # the products docstring above for why). Where two+ radars' coverage
+    # overlaps, _mask_stale_overlap keeps only the freshest radar's pixels
+    # in that shared patch so overlapping storms don't render as a muddy
+    # double-exposure or show a stale blob the fresher radar has already
+    # moved past -- see that function's docstring.
+    rasters_to_draw = _mask_stale_overlap(_last_dbz, products)
     for product in products:
-        if product not in _last_dbz:
+        if product not in rasters_to_draw:
             continue
         style = PRODUCT_STYLE.get(product, {"label": product.upper()})
         png_path = f"_forecast_overlay_{product}.png"
-        dbz_array_to_png(_last_dbz[product], product, png_path)
+        dbz_array_to_png(rasters_to_draw[product], product, png_path)
         south, west, north, east = plot_bounds_latlon(product)
         ImageOverlay(image=png_path, bounds=[[south, west], [north, east]],
                      opacity=0.7, name=f"{style['label']} reflectivity").add_to(m)
