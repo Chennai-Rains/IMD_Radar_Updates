@@ -856,14 +856,22 @@ def cluster_cells(cells: list[Cell], cluster_radius_km: float = CLUSTER_RADIUS_K
 # Even a genuinely fast-moving convective cell essentially never exceeds
 # this -- a computed speed above it is a red flag that dt_minutes was
 # spuriously tiny (e.g. a re-served/unchanged frame mistaken for a new
-# one, or two polls landing close together), not that a storm is real.
-# See the reported "1564 km/h" cone: root-caused to poll_and_decode's old
-# is_new_frame check treating every Karaikal OCR failure as a new frame
-# regardless of whether the underlying image had actually changed, which
-# it's fixed at the source now (content-hash based), but this is kept as
-# a second line of defense against any other way a near-zero dt sneaks
-# through -- physically-impossible speeds get dropped rather than shown.
-MAX_PLAUSIBLE_CELL_SPEED_KMH = 200.0
+# one, or two polls landing close together) or that track_cells matched
+# two DIFFERENT nearby cells across cycles rather than the same cell
+# having moved, not that a storm is real. See the reported "1564 km/h"
+# cone: root-caused to poll_and_decode's old is_new_frame check treating
+# every Karaikal OCR failure as a new frame regardless of whether the
+# underlying image had actually changed, fixed at the source now
+# (content-hash based) -- but even after that fix, a since-reported
+# 101 km/h was still well above anything realistic for monsoon-season
+# convective cell motion (typically 15-40 km/h even for a fast, well-
+# organized squall line -- per on-the-ground tracking experience, not
+# just a guess), so the bound here is set from that domain knowledge
+# rather than "some large number that's merely not impossible". Kept as
+# a second line of defense against any other way a bad dt or a bad
+# nearest-neighbour match sneaks through track_cells -- speeds above
+# this get dropped (no cone) rather than shown as if trustworthy.
+MAX_PLAUSIBLE_CELL_SPEED_KMH = 60.0
 
 
 def track_cells(prev_cells: list[Cell], new_cells: list[Cell], dt_minutes: float,
