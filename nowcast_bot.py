@@ -335,11 +335,63 @@ PRODUCTS = {
         # from the frame's own panel border pixels.
         "plot_bbox": (100, 300, 700, 900),
         "cell_dbz_threshold": 35,   # matches every other MAXZ product here
-        # No printed numeric range-ring labels found within the plan-view
-        # crop for this layout (unlike NIOT/Karaikal, which print "XX km"
-        # boxes directly on the rings) -- this radar's georeferencing comes
-        # from the lat/lon axis instead, so there's nothing here that needs
-        # excluding the way label_exclude_boxes does for the other radars.
+        # This layout has no printed "XX km" range-ring label boxes to
+        # exclude the way NIOT/Karaikal need -- but it draws full-panel
+        # solid white lat/lon GRIDLINES instead, and this product's LUT
+        # happens to have a pale yellow-white band (~35-42 dBZ) that a
+        # near-white gridline pixel lands within DIST_THRESHOLD of. Live
+        # frames confirmed this: over half of one cycle's detected
+        # "cells" had their centroid sitting exactly on a gridline
+        # row/column, all in that same pale dBZ band -- a real storm
+        # doesn't line up with the degree grid. These boxes mask an ~11px
+        # strip along every gridline (measured from the frame's own
+        # gridline pixel positions, same source as site_px/km_per_px
+        # above, then padded a few px past the exact line to also catch
+        # the anti-aliased halo of near-white pixels immediately next to
+        # it -- a first pass using a tighter ~5px strip still let a
+        # handful of these halo pixels through on real frames) so those
+        # pixels can't register as fake weak echo. Real echo is a filled
+        # area, not a thin line, so this costs at most a sliver of a
+        # genuine storm that happens to sit right under a gridline -- not
+        # the storm itself.
+        "label_exclude_boxes": [
+            # lat gridlines (12.0N down to 8.0N, every 0.5 deg) -- full
+            # plot width, y from the frame's own gridline pixel rows
+            (100, 317, 700, 328), (100, 384, 700, 395), (100, 450, 700, 461),
+            (100, 517, 700, 528), (100, 584, 700, 595), (100, 651, 700, 662),
+            (100, 718, 700, 729), (100, 785, 700, 796), (100, 852, 700, 863),
+            # lon gridlines (75E-78E, every 1 deg; 74E coincides with the
+            # crop's own left border and needs no separate box) -- full
+            # plot height
+            (226, 300, 237, 900), (358, 300, 369, 900),
+            (489, 300, 500, 900), (621, 300, 632, 900),
+        ],
+        # Beyond the gridlines, this layout draws a shaded terrain/coastline
+        # basemap UNDER the plan-view panel (unlike NIOT/Karaikal's plain
+        # background) — and a handful of that basemap's flat fill colors
+        # (land shading, coastline outline, city-name text) turn out to
+        # EXACTLY equal colorbar swatch colors (distance 0 in the KD-tree
+        # match, same as genuine echo -- no DIST_THRESHOLD tweak can tell
+        # these apart from real echo by colour alone). Confirmed by
+        # intersecting the raw threshold mask across 6 independent archived
+        # frames spanning ~2 hours: ~1650 of ~1850 matched pixels per frame
+        # (about 90%) sat at the literal same pixel in every single frame,
+        # traced to only 10 distinct RGB values, all clearly land/text
+        # colors (dark near-black text, tan/brown terrain shades) rather
+        # than the blue/green tones real echo renders in. A real storm
+        # would not occupy the exact same pixels, unchanging, for 2 hours
+        # straight while everything else on the map moves. Excluding by
+        # exact colour would also suppress genuine echo anywhere else in
+        # the frame that happens to render at one of these same dBZ levels
+        # (38-42, right at this product's low end) -- excluding by fixed
+        # PIXEL POSITION instead (this mask) only ever blocks these known
+        # static basemap pixels, and a genuine storm forming anywhere else,
+        # even at the same intensity, is untouched. This mask only covers
+        # what these 6 sample frames happened to show as static; if a
+        # future frame reveals another persistently-colliding basemap
+        # pixel, extend masks/koc_maxz_static_exclude.png the same way
+        # (regenerate the intersection over a fresh batch of frames).
+        "static_exclude_mask": "masks/koc_maxz_static_exclude.png",
     },
 }
 
@@ -356,6 +408,27 @@ STATE_FILE = Path("./niot_bot_state.json")
 # extract_cells() using that product's own km_per_px, calibrated so NIOT
 # MAXZ keeps behaving exactly as before (15px at its 10.557 km_per_px).
 MIN_CELL_AREA_KM2 = 15 / (10.557 ** 2)
+
+# The area-based floor above degenerates to well under 1 pixel at coarse
+# resolutions (Karaikal's km_per_px=1.0411 -> ~0.15px, Kochi's 1.2072 ->
+# ~0.2px), meaning literally any single stray pixel — a colour-LUT
+# near-match against anti-aliasing, a text edge, a coastline, or basemap
+# noise — trivially "passes" the area filter with room to spare. A real
+# echo, even a small/weak one, is a filled patch several pixels wide, not
+# an isolated speck. Measured on real archived Kochi frames: of ~1250 raw
+# connected components per frame surviving the area floor alone, the
+# pixel-count histogram was overwhelmingly 1-4px, tapering off sharply,
+# with essentially nothing resembling a genuine storm's footprint above
+# ~15px in any of 6 consecutive frames spanning ~2 hours with no reported
+# severe weather. A floor of 5px cuts that noise by roughly 80% (down to
+# the 40s per frame) while barely touching Karaikal, which already runs
+# 1-6 raw components per frame at this same near-zero area floor (i.e. it
+# wasn't relying on tiny blobs to detect real storms either). This is a
+# hard floor on raw pixel count, applied on TOP of (never instead of) the
+# area-based floor, so it only ever discards components the area-based
+# floor would have let through at coarse resolutions — it changes nothing
+# for NIOT MAXZ, whose area floor (15px) already exceeds this.
+MIN_CELL_ABSOLUTE_PIXELS = 5
 MATCH_ACROSS_PRODUCTS_KM = 8.0
 
 # Nearby individual blobs within this radius of each other get merged
@@ -737,6 +810,24 @@ def get_kdtree(product: str, lut: list) -> tuple[cKDTree, np.ndarray]:
     return _kdtree_cache[product]
 
 
+# Per-product static exclude mask, loaded once and cached — see
+# "static_exclude_mask" in PRODUCTS[...] below for why this exists (koc_maxz
+# specifically). Boolean array, True = permanently excluded pixel, same
+# shape as that product's plot_bbox crop (h, w).
+_static_mask_cache: dict[str, np.ndarray] = {}
+
+
+def get_static_exclude_mask(product: str) -> np.ndarray | None:
+    cfg = PRODUCTS[product]
+    path = cfg.get("static_exclude_mask")
+    if not path:
+        return None
+    if product not in _static_mask_cache:
+        arr = np.array(Image.open(path).convert("L"))
+        _static_mask_cache[product] = arr > 0
+    return _static_mask_cache[product]
+
+
 def nearest_dbz(pixel_rgb: tuple[int, int, int],
                  lut: list[tuple[tuple[int, int, int], float]]) -> float | None:
     """Single-pixel lookup — kept for occasional ad-hoc use, but
@@ -804,6 +895,10 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         if y1 > y0 and x1 > x0:
             dbz[y0:y1, x0:x1] = np.nan
 
+    static_mask = get_static_exclude_mask(product)
+    if static_mask is not None:
+        dbz[static_mask] = np.nan
+
     return dbz
 
 
@@ -832,8 +927,12 @@ def extract_cells(dbz: np.ndarray, product: str, elevation_deg: float | None,
     threshold = cfg["cell_dbz_threshold"]
     # Real minimum pixel floor for THIS product's resolution — see
     # MIN_CELL_AREA_KM2 above for why a flat pixel count doesn't transfer
-    # across radars with very different km_per_px.
-    min_cell_pixels = MIN_CELL_AREA_KM2 * cfg["km_per_px"] ** 2
+    # across radars with very different km_per_px. Also enforce a small
+    # absolute pixel-count floor on top (see MIN_CELL_ABSOLUTE_PIXELS) —
+    # at coarse resolutions the area-derived floor alone is sub-pixel and
+    # provides no real protection against single-pixel noise.
+    min_cell_pixels = max(MIN_CELL_AREA_KM2 * cfg["km_per_px"] ** 2,
+                           MIN_CELL_ABSOLUTE_PIXELS)
     mask = dbz >= threshold
     # Binary closing merges pixel-scale gaps within a single storm so it
     # reads as one coherent cell instead of a dozen adjacent fragments —
