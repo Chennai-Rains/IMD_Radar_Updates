@@ -1533,10 +1533,24 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
 
     for r in radars_shown:
         site = RADAR_SITES[r]
+        # Plain default marker, deliberately NOT icon=folium.Icon(icon=...,
+        # prefix="fa") -- that routes through Leaflet's AwesomeMarkers
+        # plugin, which pulls in two extra third-party CDN resources
+        # (leaflet.awesome-markers.js + Font Awesome's CSS) just to draw
+        # this one decorative pin. If EITHER fails to load -- blocked by
+        # an ad-blocker or a corporate/school network, or just a flaky
+        # CDN moment -- the resulting uncaught JS exception
+        # ("Cannot read properties of undefined (reading 'icon')") halts
+        # the REST of this script, including every storm cell/cone/
+        # tile-layer call still queued after it -- producing exactly the
+        # "banner and legend show, but the map itself is blank" symptom
+        # reported and reproduced (locally, by blocking that one CDN
+        # request and watching the whole render die on this line). Not
+        # worth risking the entire map over a pin's color/glyph -- the
+        # tooltip already names which radar this is.
         folium.Marker(
             [site["site_lat"], site["site_lon"]],
             tooltip=RADAR_MARKER_LABEL.get(r, r),
-            icon=folium.Icon(color="black", icon="broadcast-tower", prefix="fa"),
         ).add_to(m)
 
     # One range-boundary ring per (radar, range) pair actually shown --
