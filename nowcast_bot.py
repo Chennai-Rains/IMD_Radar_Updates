@@ -1619,12 +1619,17 @@ def build_watermark_html() -> str:
     faint enough not to interfere with reading the radar/cones, but present
     everywhere so it can't just be cropped out of a corner. pointer-events:
     none so it never blocks clicking the map underneath."""
-    watermark_text = "Radar map by www.chennairains.com"
+    # Smaller and fainter than the original -- still a real watermark (a
+    # screenshot of the map still carries attribution, still tiled so it
+    # can't be cropped out of one corner), but the goal shifted from
+    # "clearly branded" to "present without getting in the way": readable
+    # on close inspection, easy to look past at a glance.
+    watermark_text = "Radar Nowcast by https://plots.chennairains.com/"
     watermark_svg = f"""
-    <svg xmlns='http://www.w3.org/2000/svg' width='420' height='260'>
-        <text x='210' y='135' transform='rotate(-28 210 135)'
-              font-family='Arial, sans-serif' font-size='13'
-              fill='rgba(0,0,0,0.14)' text-anchor='middle'
+    <svg xmlns='http://www.w3.org/2000/svg' width='460' height='260'>
+        <text x='230' y='135' transform='rotate(-28 230 135)'
+              font-family='Arial, sans-serif' font-size='9'
+              fill='rgba(0,0,0,0.10)' text-anchor='middle'
               font-weight='600'>{watermark_text}</text>
     </svg>
     """
