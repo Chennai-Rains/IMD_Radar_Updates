@@ -474,6 +474,17 @@ AUTOREFRESH_MINUTES = 10
 # false-flagging a normal reading.
 STALE_OBS_MINUTES = 60
 
+# Direction arrows are only reliable where the underlying imagery is full
+# resolution. Karaikal cells detected out on the 250-500km extended ring
+# (kkl_ppz, coarser pixels — see mask_within_km on that PRODUCTS entry)
+# still get a storm marker and tooltip, just no arrow: a bearing computed
+# off a coarse-pixel centroid track is noisier than it looks once drawn as
+# a confident-looking arrow. Keyed by radar name (RADAR_SITES/PRODUCT_RADAR),
+# not product, since a cell's product can be either of Karaikal's two.
+# Radars not listed here (niot, kochi) are unrestricted — this is currently
+# a Karaikal-only concern.
+ARROW_MAX_RANGE_KM = {"karaikal": 250.0}
+
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
     """Which physical radar a product belongs to (see RADAR_SITES /
@@ -1904,8 +1915,16 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
             continue
         drawn_ranges.add(key)
         folium.Circle(
+            # Thin/faint on purpose -- this ring is reference context (how
+            # far out a radar's scan nominally reaches), not data, and with
+            # 2+ radars' rings now often overlapping (see _mask_stale_overlap
+            # and, with the 500km Karaikal extension, a second ring on top
+            # of that), the original weight/opacity stacked into a visually
+            # heavy crosshatch right where readers most need to see the
+            # actual reflectivity underneath. Reported directly as too
+            # intrusive; still visible, just recedes behind the data now.
             location=[site["site_lat"], site["site_lon"]],
-            radius=range_km * 1000.0, color="#555555", weight=1.5, opacity=0.6,
+            radius=range_km * 1000.0, color="#555555", weight=0.75, opacity=0.4,
             dash_array="6,6", fill=False,
             tooltip=f"{range_km:.0f} km range — {product.upper()} scan boundary",
         ).add_to(m)
@@ -1951,6 +1970,14 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
         if not c.velocity_kmh or c.velocity_kmh[0] < min_speed_kmh:
             continue  # no reliable motion yet, or effectively stationary
         speed_kmh, bearing_deg = c.velocity_kmh
+
+        radar = PRODUCT_RADAR.get(c.product)
+        max_range = ARROW_MAX_RANGE_KM.get(radar)
+        if max_range is not None:
+            site = RADAR_SITES[radar]
+            dist_km = _haversine_km((site["site_lat"], site["site_lon"]), c.centroid_latlon)
+            if dist_km > max_range:
+                continue  # beyond the full-resolution disc -- marker only, no arrow
 
         # Direction arrow only -- no uncertainty cone. The cones (one
         # widening translucent wedge per lead time) were covering enough of
