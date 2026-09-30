@@ -127,28 +127,65 @@ jobs:
           commit_user_name: "nowcast-bot"
           commit_user_email: "actions@users.noreply.github.com"
 
-      - name: Upload storm_forecast_map.html to plots.chennairains.com
+      - name: Upload storm_forecast_map.html to plots.chennairains.com (atomic swap)
         # Runs even if the state-tracking commit above failed (e.g. a
         # push race that self-heals next cycle) -- the map file itself
         # was already built fresh in "Run one nowcast polling cycle"
         # regardless of git's outcome, and a tracking-state hiccup should
         # never be the reason the live site misses an update. Only skips
         # if the job itself was cancelled.
+        #
+        # NOT FTP-Deploy-Action any more: it overwrites the live filename
+        # directly via a plain STOR. This file is multi-MB (folium
+        # base64-embeds the raster overlay PNGs into the HTML), so that
+        # in-place rewrite takes long enough over FTP that a visitor
+        # hitting the URL mid-upload can get a broken or missing (404)
+        # response -- and since this bot redeploys every ~15 minutes,
+        # that exposure window recurs on every single cycle, not just an
+        # unlucky one. (A first attempt at fixing this, in an earlier
+        # commit, used lftp but still `rm`'d the live file before `mv`ing
+        # the new one into place -- reopening exactly the gap it was
+        # meant to close, and it also failed outright on its first real
+        # run against the server before that could even be noticed.)
+        #
+        # This version uploads to a throwaway filename first, then swaps
+        # it into place with a single `mv` (FTP RNFR/RNTO) straight over
+        # the live filename -- no separate delete. A rename is a metadata
+        # operation the underlying filesystem performs atomically, so
+        # visitors always see either the complete old file or the
+        # complete new one, never neither. The two lftp calls are kept
+        # separate (rather than one script with both commands) with
+        # `set -e` around them so that if the upload itself fails or is
+        # interrupted, the rename is never attempted and the live file is
+        # untouched.
         if: ${{ !cancelled() }}
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_HOST }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: 21
-          # cPanel's FTP Accounts page for this account explicitly offers
-          # "FTP & explicit FTPS" on port 21 -- explicit FTPS negotiates
-          # TLS over the same plain-FTP port (STARTTLS-style), so this is
-          # both more secure than plain FTP and matches what the host
-          # actually advertises supporting.
-          protocol: ftps
-          local-dir: ./output/
-          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
-          # Never delete anything already sitting in that remote folder --
-          # this only ever adds/overwrites storm_forecast_map.html.
-          dangerous-clean-slate: false
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+
+          echo "Uploading to a throwaway remote name..."
+          lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
+            set ftp:ssl-force true;
+            set ftp:ssl-protect-data true;
+            set ssl:verify-certificate no;
+            set ftp:passive-mode true;
+            cd $FTP_REMOTE_DIR;
+            put output/storm_forecast_map.html -o storm_forecast_map.html.new;
+            bye
+          " "$FTP_HOST"
+
+          echo "Upload complete -- swapping it into place atomically..."
+          lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
+            set ftp:ssl-force true;
+            set ftp:ssl-protect-data true;
+            set ssl:verify-certificate no;
+            set ftp:passive-mode true;
+            cd $FTP_REMOTE_DIR;
+            mv storm_forecast_map.html.new storm_forecast_map.html;
+            bye
+          " "$FTP_HOST"
