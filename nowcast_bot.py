@@ -453,6 +453,15 @@ ELEVATED_BEAM_THRESHOLD_KM = 1.5
 # on exactly the same moment as an in-progress upload every single cycle.
 AUTOREFRESH_MINUTES = 10
 
+# How old a product's displayed observation time has to be before
+# build_info_banner_html() flags it as stale instead of showing it with
+# plain styling -- see that function for why this matters (a reader can't
+# otherwise tell "this is live" from "this radar's feed has been stuck for
+# hours" just by glancing at the banner). Comfortably above the ~15 min
+# poll cadence to allow for IMD's own ordinary publishing lag without
+# false-flagging a normal reading.
+STALE_OBS_MINUTES = 60
+
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
     """Which physical radar a product belongs to (see RADAR_SITES /
@@ -1376,14 +1385,28 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
     storm actually is right now.
 
     Fix: in any patch of ground covered by more than one radar currently
-    being drawn, keep only the FRESHEST radar's pixels there and drop
-    (NaN out -> fully transparent, same convention dbz_array_to_png
-    already uses for "no data") every staler radar's pixels in that same
-    patch. Each radar's raster is left completely untouched outside an
-    overlap -- its own unique-coverage area always renders exactly as
-    before -- so this only ever removes a pixel a viewer could otherwise
-    see fresher data for at the same spot, never data unique to that
-    radar.
+    being drawn, where the FRESHER radar actually has real reflectivity
+    data at that exact spot, drop (NaN out -> fully transparent, same
+    convention dbz_array_to_png already uses for "no data") the staler
+    radar's pixel there. Each radar's raster is left completely untouched
+    outside an overlap -- its own unique-coverage area always renders
+    exactly as before -- so this only ever removes a pixel a viewer could
+    otherwise see fresher data for at the same spot, never data unique to
+    that radar.
+
+    Checking the fresher radar's ACTUAL per-pixel data (not just whether
+    the spot falls within its range CIRCLE) matters: a range circle covers
+    ground the radar has a clear view of, not ground it's currently
+    reporting rain over -- most of any radar's range circle is normally
+    empty/NaN (no echo). The original version dropped every staler pixel
+    anywhere inside the fresher radar's full range circle regardless of
+    whether the fresher radar had any data there, which silently erased
+    genuine storms sitting in a range-circle overlap the fresher radar
+    simply hadn't detected anything at (e.g. NIOT and Kochi's circles
+    overlap out past Erode, and a real storm only Karaikal or NIOT was
+    picking up there would vanish under Kochi's empty circle) -- reported
+    directly as storms visible in one radar's own map but missing from the
+    combined one, in exactly this kind of overlap zone.
 
     Purely a display fix: doesn't touch cell extraction, tracking, or the
     forecast-cone fusion (`fuse=`) logic above, and runs regardless of
@@ -1406,15 +1429,32 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
 
         drop = np.zeros(len(xs), dtype=bool)
         for other_product in products:
-            if other_product not in masked or other_product == product:
+            # Compared against the ORIGINAL, pre-masking rasters
+            # (dbz_by_product, not `masked`) so this doesn't depend on
+            # what order `products` happens to process in -- with 3
+            # radars shown together, an earlier product in this loop may
+            # already have had some of ITS pixels dropped by a third,
+            # even-fresher radar, and that shouldn't change what counts
+            # as "real data" when checking a later product here.
+            if other_product not in dbz_by_product or other_product == product:
                 continue
             if PRODUCT_RADAR[other_product] == PRODUCT_RADAR[product]:
                 continue  # same radar, e.g. two products off one site -- not an overlap case
             if _effective_obs_time(other_product) <= this_time:
                 continue  # other isn't strictly fresher -- doesn't get to mask this one
-            other_site = site_for(other_product)
-            dist_km = _haversine_km((lat, lon), (other_site["site_lat"], other_site["site_lon"]))
-            drop |= dist_km <= PRODUCTS[other_product]["range_km"]
+
+            other_arr = dbz_by_product[other_product]
+            other_ox = PRODUCTS[other_product]["plot_bbox"][0]
+            other_oy = PRODUCTS[other_product]["plot_bbox"][1]
+            other_px, other_py = latlon_to_pixel(lat, lon, other_product)
+            other_x = np.round(other_px - other_ox).astype(int)
+            other_y = np.round(other_py - other_oy).astype(int)
+            in_bounds = ((other_x >= 0) & (other_x < other_arr.shape[1]) &
+                         (other_y >= 0) & (other_y < other_arr.shape[0]))
+            has_data = np.zeros(len(xs), dtype=bool)
+            idx = np.where(in_bounds)[0]
+            has_data[idx] = ~np.isnan(other_arr[other_y[idx], other_x[idx]])
+            drop |= has_data
 
         if drop.any():
             arr[ys[drop], xs[drop]] = np.nan
@@ -1462,13 +1502,6 @@ def build_dbz_legend_html(products: tuple) -> str:
 
 from zoneinfo import ZoneInfo
 
-FORECAST_STYLE = {
-    30: {"color": "#fdae61", "label": "+30 min"},
-    60: {"color": "#f46d43", "label": "+60 min"},
-    90: {"color": "#d73027", "label": "+90 min"},
-}
-
-
 def project_forward(lat: float, lon: float, speed_kmh: float, bearing_deg: float,
                      lead_minutes: float) -> tuple[float, float]:
     """Straight-line kinematic projection of a point, same flat-earth
@@ -1480,36 +1513,23 @@ def project_forward(lat: float, lon: float, speed_kmh: float, bearing_deg: float
     return lat + dlat, lon + dlon
 
 
-def uncertainty_cone_polygon(lat: float, lon: float, speed_kmh: float, bearing_deg: float,
-                              lead_minutes: float, base_half_angle_deg: float = 15.0,
-                              angle_growth_per_hour: float = 20.0,
-                              n_arc_points: int = 12) -> list[tuple[float, float]]:
-    """A cone from the cell's current position toward its projected position
-    at `lead_minutes`, widening with lead time. Returns polygon vertices
-    (apex -> arc -> apex) as (lat, lon) pairs, or [] if there's no motion to
-    project (near-stationary or unknown track)."""
-    dist_km = speed_kmh * (lead_minutes / 60.0)
-    if dist_km <= 0:
-        return []
-    half_angle = base_half_angle_deg + angle_growth_per_hour * (lead_minutes / 60.0)
-    apex = (lat, lon)
-    arc_points = [project_forward(lat, lon, speed_kmh, bearing_deg + a, lead_minutes)
-                  for a in np.linspace(-half_angle, half_angle, n_arc_points)]
-    return [apex] + arc_points + [apex]
-
-
 def build_bearing_arrow_icon(bearing_deg: float, color: str) -> folium.DivIcon:
     """A small filled triangle, rotated to point along `bearing_deg` (a
     standard compass bearing -- 0=N, 90=E, same convention project_forward
-    uses -- so it lines up with the cone drawn from the same bearing/speed
-    with no separate conversion needed).
+    uses, so a position computed via project_forward's bearing lines up
+    with this icon's rotation with no separate conversion needed).
 
-    A forecast cone alone shows an uncertainty envelope, but nothing about
-    its shape actually says "moving this way" to someone glancing at it --
-    the wide end can just as easily read as "spreading out in all these
-    directions" as "heading toward here." A small arrow along the cone's
-    own centerline removes that ambiguity in a way a color or a tooltip
-    (which nobody hovers on a public read-only page) doesn't.
+    This used to sit inside a widening translucent "uncertainty cone"
+    polygon per lead time (one wedge each for +30/+60/+90 min), which is
+    where the "own centerline" framing below comes from. The cones were
+    dropped -- on a busy multi-cell frame they covered enough of the
+    reflectivity raster underneath to make the actual storms hard to see,
+    reported directly against real screenshots -- so the arrow is now the
+    only way direction is shown on the map, not just the disambiguating
+    detail inside a bigger shape. It's kept precisely because, cone or no
+    cone, nothing about a plain colored dot says "moving this way" to
+    someone glancing at the map -- and a tooltip nobody hovers on a public
+    read-only page doesn't help either.
 
     Plain inline SVG in a DivIcon rather than a Leaflet plugin (e.g.
     leaflet-polylinedecorator, the "proper" way to put arrowheads on a
@@ -1578,13 +1598,36 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
     on top of Leaflet's zoom control. Anchoring it here instead keeps it
     away from any map control regardless of screen size."""
     ist = ZoneInfo("Asia/Kolkata")
+    now_utc = datetime.now(timezone.utc)
     lines = []
     for product in products:
         obs_time = last_obs_time_seen.get(product)
         label = PRODUCT_STYLE.get(product, {"label": product.upper()})["label"].split(" - ")[0]
         if obs_time:
             local = obs_time.astimezone(ist)
-            lines.append(f"{label}: {local.strftime('%d %b, %H:%M')} IST")
+            age_min = (now_utc - obs_time).total_seconds() / 60.0
+            # A genuinely odd/old time here (reported directly -- e.g.
+            # Karaikal reading several hours behind NIOT/Kochi in the same
+            # banner) has two real causes that look identical at a glance:
+            # IMD's own feed for that one radar has stalled/gone down for a
+            # while and keeps re-serving the same old frame (this happens;
+            # our poll correctly reads whatever timestamp is actually
+            # printed on the image), or a rarer OCR/template misread.
+            # Either way, presenting it with the same plain styling as a
+            # normal fresh reading is the actual problem -- a reader can't
+            # tell "this is live" from "this radar's been down since
+            # lunch" just by glancing at the banner. STALE_OBS_MINUTES
+            # (comfortably above the ~15 min poll cadence, to allow for
+            # IMD's own ordinary publishing lag) flags it instead of
+            # silently blending in.
+            if age_min > STALE_OBS_MINUTES:
+                lines.append(
+                    f'{label}: <span style="color:#c0392b; font-weight:600;">'
+                    f'{local.strftime("%d %b, %H:%M")} IST ⚠ stale'
+                    f'</span>'
+                )
+            else:
+                lines.append(f"{label}: {local.strftime('%d %b, %H:%M')} IST")
         else:
             lines.append(f"{label}: time unavailable")
     times_html = "<br>".join(lines)
@@ -1738,11 +1781,15 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
                         min_speed_kmh: float = 5.0,
                         out_html: str | None = "storm_forecast_map.html"):
     """Draws the current reflectivity raster, each tracked cell's current
-    position, and a widening projected-motion cone per lead time -- on the
+    position, and a direction arrow for its projected motion -- on the
     CARTO basemap + per-radar range-boundary ring(s), same multi-radar
     pattern as build_osm_verification_map(). The raster overlay is what
     makes the storm's actual shape/extent visible (not just a dot at its
     centroid), same reasoning as build_osm_verification_map's overlay.
+    (An earlier version also drew a widening translucent "uncertainty
+    cone" polygon per lead time behind the arrow -- dropped because it
+    covered too much of that raster on a busy multi-cell frame; see
+    build_bearing_arrow_icon's docstring.)
 
     products: tuple of product keys, e.g. ("maxz",) for NIOT only, or
         ("maxz", "kkl_maxz") for NIOT + Karaikal together. Unlike
@@ -1754,7 +1801,7 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
 
     fuse: with more than one radar in `products`, cross-radar cluster the
         cells first (cluster_cells over every shown product's cells) so a
-        storm sitting in both radars' coverage gets ONE projected cone
+        storm sitting in both radars' coverage gets ONE projected arrow
         instead of two overlapping, possibly-disagreeing ones. Velocity for
         a fused cell comes from whichever source cell cluster_cells picked
         as representative -- same as build_osm_verification_map's fused
@@ -1870,29 +1917,23 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
             continue  # no reliable motion yet, or effectively stationary
         speed_kmh, bearing_deg = c.velocity_kmh
 
-        # draw furthest/widest cone first so nearer-term cones layer on top
-        for lead in sorted(lead_times_min, reverse=True):
-            poly = uncertainty_cone_polygon(*c.centroid_latlon, speed_kmh, bearing_deg, lead)
-            if not poly:
-                continue
-            style = FORECAST_STYLE.get(lead, {"color": "#999999", "label": f"+{lead} min"})
-            folium.Polygon(
-                locations=poly, color=style["color"], weight=1, fill=True,
-                fill_color=style["color"], fill_opacity=0.15,
-                tooltip=f"{label_prefix} #{c.id} projected {style['label']} "
-                        f"({speed_kmh:.0f} km/h, bearing {bearing_deg:.0f}°)",
-            ).add_to(m)
-            n_projected += 1
-
-        # One direction arrow per moving cell, sitting inside the nearest
-        # (innermost) cone along its own centerline -- see
-        # build_bearing_arrow_icon's docstring for why this exists. Placed
-        # a bit past the halfway point of the SHORTEST lead time: close
-        # enough to the storm marker to clearly belong to it, far enough
-        # out to read as "this way" rather than sit on top of the marker.
-        # A fixed dark neutral color (not tied to any one lead time's
-        # color) since it needs to stay legible over all three
-        # differently-colored, semi-transparent cones it's drawn inside.
+        # Direction arrow only -- no uncertainty cone. The cones (one
+        # widening translucent wedge per lead time) were covering enough of
+        # the raster underneath, on a busy multi-cell frame, that the
+        # actual reflectivity imagery they're meant to sit on top of became
+        # hard to read -- reported directly, and visible in side-by-side
+        # screenshots where the storms were barely visible under a stack of
+        # overlapping orange/red wedges. The arrow alone still answers the
+        # question the cones existed for ("which way is this cell
+        # heading"), just without the added canvas coverage a full
+        # confidence-envelope shape brings. Lead-time-specific reach/speed
+        # detail is still in the tooltip below; it's just not drawn as
+        # shapes on the map any more.
+        #
+        # Placed a bit past the halfway point of the SHORTEST configured
+        # lead time: close enough to the storm marker to clearly belong to
+        # it, far enough out to read as "this way" rather than sit on top
+        # of the marker.
         nearest_lead = min(lead_times_min)
         arrow_lat, arrow_lon = project_forward(*c.centroid_latlon, speed_kmh,
                                                 bearing_deg, nearest_lead * 0.55)
@@ -1902,6 +1943,7 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
             tooltip=f"{label_prefix} #{c.id} heading {bearing_deg:.0f}° "
                     f"at {speed_kmh:.0f} km/h",
         ).add_to(m)
+        n_projected += 1
 
     if n_projected == 0:
         print("No cells with usable velocity yet — need at least two consecutive "
