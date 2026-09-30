@@ -1582,6 +1582,30 @@ def build_watermark_html() -> str:
     """
 
 
+def build_home_button_html() -> str:
+    """Small floating pill, bottom-center, back to the forecast-maps hub
+    (plots.chennairains.com/index.html -- the "All forecasts" index other
+    ChennaiRains map pages already link back to) so a reader who lands
+    straight on the live radar page isn't stuck here with no way back
+    except the browser's back button, which won't work if they arrived via
+    a bookmark/shared link. Deliberately separate from the small logo icon
+    (build_logo_tag/build_fallback_logo_html), which points at the main
+    chennairains.com site instead -- this is "back to the forecasts I was
+    just browsing", not "back to the blog homepage". Bottom-center, clear
+    of the legend (bottom-left) and info banner/logo (top-right)."""
+    return """
+    <a href="https://plots.chennairains.com/index.html"
+       style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+              z-index: 9999; background: rgba(30,30,30,0.85); color: #fff;
+              font-family: -apple-system, Arial, sans-serif; font-size: 13px;
+              font-weight: 600; padding: 9px 16px; border-radius: 999px;
+              text-decoration: none; box-shadow: 0 1px 6px rgba(0,0,0,0.35);
+              white-space: nowrap;">
+        &#8592; All forecasts
+    </a>
+    """
+
+
 def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
                         lead_times_min: tuple = (30, 60, 90),
                         min_speed_kmh: float = 5.0,
@@ -1746,6 +1770,7 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
         m.get_root().html.add_child(folium.Element(build_fallback_logo_html()))
 
     m.get_root().html.add_child(folium.Element(build_watermark_html()))
+    m.get_root().html.add_child(folium.Element(build_home_button_html()))
     m.get_root().script.add_child(folium.Element(build_autorefresh_script()))
 
     if out_html:
