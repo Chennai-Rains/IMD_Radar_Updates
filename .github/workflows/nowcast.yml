@@ -41,6 +41,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          # Explicit `main`, not the default. Without this, checkout uses
+          # github.sha, which for workflow_dispatch is resolved to main's
+          # tip the MOMENT the run is dispatched/queued -- not when it
+          # actually starts executing. The concurrency group above
+          # serializes EXECUTION (only one run at a time), but does nothing
+          # about that stale ref: a run queued behind another (e.g. a
+          # manual dispatch fired close to the external pinger's own tick)
+          # still checks out the OLD commit from its own dispatch moment
+          # once it's finally its turn, missing whatever the run(s) ahead
+          # of it just pushed. That's exactly what caused a real failure:
+          # the queued run's local state didn't know about an archive
+          # frame the run ahead of it had already saved+committed under
+          # the same filename (same source timestamp, nothing had changed
+          # on IMD's end between the two), so it re-saved it locally, and
+          # the later `git fetch && git rebase origin/main` below found
+          # that filename already committed upstream -- a genuine, if
+          # already-handled-safely (see that step below), file collision.
+          # Pinning to `main` here means every run, however long it sat
+          # queued, always starts from the true current tip.
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -72,11 +92,35 @@ jobs:
         # a genuine conflict, that should cost this one cycle's tracking
         # state -- which self-heals next run -- not the live map upload
         # in the step after this one.
-        run: git fetch origin main && git rebase origin/main --autostash
+        #
+        # Explicitly cleaning up a failed rebase matters, not just
+        # tolerating it: a plain conflict leaves the repo mid-rebase
+        # (detached HEAD, unmerged index), and that broken state is what
+        # actually took the site down once -- the commit step after this
+        # one (which has no continue-on-error) then failed for real
+        # against that half-rebased tree, which in turn made the upload
+        # step after THAT skip entirely (steps without an explicit `if:`
+        # only run if every step before them succeeded, and continue-
+        # on-error on THIS step doesn't extend to steps two levels down).
+        # So: on any rebase failure, abort back to a clean, valid branch
+        # state (autostash's own stash is restored by --abort; the `||
+        # true` on the pop is just in case abort already restored it)
+        # before moving on, so the commit step always has normal,
+        # uncommitted working-tree changes to work with -- worst case
+        # this cycle's commit lands a step behind main instead of neatly
+        # rebased onto it, which self-heals next run either way.
+        run: |
+          git fetch origin main
+          if ! git rebase origin/main --autostash; then
+            echo "Rebase failed/conflicted -- aborting to a clean state so the commit+upload steps still run this cycle."
+            git rebase --abort || true
+            git stash pop || true
+          fi
         continue-on-error: true
 
       - name: Commit updated tracking state + frame archive
         uses: stefanzweifel/git-auto-commit-action@v5
+        continue-on-error: true
         with:
           commit_message: "Update nowcast tracking state"
           file_pattern: "state/ archive/"
@@ -84,6 +128,13 @@ jobs:
           commit_user_email: "actions@users.noreply.github.com"
 
       - name: Upload storm_forecast_map.html to plots.chennairains.com
+        # Runs even if the state-tracking commit above failed (e.g. a
+        # push race that self-heals next cycle) -- the map file itself
+        # was already built fresh in "Run one nowcast polling cycle"
+        # regardless of git's outcome, and a tracking-state hiccup should
+        # never be the reason the live site misses an update. Only skips
+        # if the job itself was cancelled.
+        if: ${{ !cancelled() }}
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_HOST }}

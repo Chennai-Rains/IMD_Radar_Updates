@@ -1181,6 +1181,63 @@ from PIL import Image as PILImage
 import matplotlib
 import matplotlib.colors as mcolors
 
+# Discrete/banded reflectivity color scale, used for BOTH the map overlay
+# (dbz_array_to_png) and the legend (build_dbz_legend_html) -- a single
+# shared definition so they can never drift out of sync with each other.
+#
+# Previously both used a continuous colormap (matplotlib "turbo") sampled
+# through mcolors.Normalize -- smooth gradient blending between colors, the
+# same technique a satellite temperature map or elevation shading would
+# use. That reads as muted for reflectivity specifically: turbo only
+# reaches a saturated "hot" red right near its very top, so a genuinely
+# strong 45-50 dBZ cell -- solidly in "heavy rain" territory -- still
+# rendered as yellow/yellow-orange, visually undramatic next to something
+# like a rain-rate nowcast app using hard, fully-saturated color bands per
+# tier (each band maxed out on its own, not blended toward neighbors).
+# That's a rendering-style gap, not a true difference in the measured
+# storm intensity (see the archived-frame check this was diagnosed from --
+# raw peak dBZ values were physically reasonable, matching IMD's own
+# printed colorbar).
+#
+# Fix: classic banded weather-radar reflectivity colors (the scheme used
+# by NWS/most radar viewers -- cyan/blue for light echo, green, yellow,
+# orange, red, then into magenta/purple for the most intense/rare readings)
+# with matplotlib's BoundaryNorm + ListedColormap, which assigns each pixel
+# the FLAT color of whichever band it falls in rather than blending -- so a
+# 46 dBZ cell snaps straight to solid orange instead of a yellow-orange
+# in-between, and the legend's swatches are then literally the same bins
+# the map uses, not samples of a separate gradient.
+DBZ_BAND_COLORS = [
+    "#5ce1e6",  # cyan       -- light/weak echo
+    "#2f80ed",  # blue
+    "#27ae60",  # green
+    "#a0d911",  # yellow-green
+    "#f2c811",  # yellow
+    "#f2994a",  # orange
+    "#eb4034",  # red
+    "#a3123a",  # dark red / crimson -- strongest in-range band
+    "#c724b1",  # magenta -- anything at/above the scale's own top (rare, e.g. hail cores)
+]
+
+
+def dbz_colormap_and_norm(product: str) -> tuple[mcolors.ListedColormap, mcolors.BoundaryNorm, list]:
+    """The shared banded scale for `product`: n_bands evenly spaced dBZ
+    boundaries across its native (vmin, vmax) range (from its own printed
+    colorbar -- see product_value_range), plus one extra top boundary so
+    the last color is reserved for values at/above vmax rather than being
+    just another mid-range band. Returns (cmap, norm, boundaries) --
+    callers use boundaries to place tick labels/swatches at the same edges
+    the map itself renders."""
+    vmin, vmax = product_value_range(product)
+    n_bands = len(DBZ_BAND_COLORS)
+    # n_bands boundaries spanning vmin..vmax (n_bands-1 "normal" bands),
+    # plus a final boundary above vmax reserved for the top/overflow band.
+    boundaries = list(np.linspace(vmin, vmax, n_bands)) + [vmax + (vmax - vmin) * 0.15]
+    cmap = mcolors.ListedColormap(DBZ_BAND_COLORS)
+    norm = mcolors.BoundaryNorm(boundaries, cmap.N, clip=True)
+    return cmap, norm, boundaries
+
+
 PRODUCT_STYLE = {
     "ppi":  {"color": "#d62728", "label": "NIOT PPI - surface confirmed"},
     "maxz": {"color": "#ff7f0e", "label": "NIOT MAXZ - aloft / building"},
@@ -1236,8 +1293,7 @@ def dbz_array_to_png(dbz: np.ndarray, product: str, path: str,
     Detection (decode_reflectivity/extract_cells) always uses the raw,
     unsmoothed array -- this function only affects what's drawn."""
     vmin, vmax = product_value_range(product)
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    cmap = matplotlib.colormaps["turbo"]
+    cmap, norm, _ = dbz_colormap_and_norm(product)
 
     if smooth_sigma_px > 0:
         values, coverage = _smooth_nan_aware(dbz, smooth_sigma_px)
@@ -1333,26 +1389,28 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
     return masked
 
 
-def build_dbz_legend_html(products: tuple, n_swatches: int = 8) -> str:
+def build_dbz_legend_html(products: tuple) -> str:
     """A floating color-scale legend (swatches + value ticks), the same
     idea as the mm/h bar on rain-radar apps -- so a viewer can read a
     color on the map back into a dBZ value without opening a popup.
-    Built from the same turbo colormap / value range dbz_array_to_png
-    uses, so it always matches what's actually drawn."""
+    Each swatch is one flat band from DBZ_BAND_COLORS via
+    dbz_colormap_and_norm, the SAME shared definition dbz_array_to_png
+    uses, so the legend is never just an approximation of what's drawn --
+    it's literally the same bins."""
     vmin, vmax = product_value_range(products[0])  # legend reflects the primary displayed product's scale
-    cmap = matplotlib.colormaps["turbo"]
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    cmap, norm, boundaries = dbz_colormap_and_norm(products[0])
 
     swatches = ""
-    for i in range(n_swatches):
-        val = vmin + (vmax - vmin) * i / (n_swatches - 1)
-        rgba = cmap(norm(val))
-        hexcolor = mcolors.to_hex(rgba)
+    for i, hexcolor in enumerate(DBZ_BAND_COLORS):
+        # Label each band by its lower edge, except the last (open-ended
+        # top band, e.g. "60+") since it has no real upper bound.
+        label_val = boundaries[i]
+        label = f"{label_val:.0f}+" if i == len(DBZ_BAND_COLORS) - 1 else f"{label_val:.0f}"
         swatches += (
             f'<div style="flex:1; text-align:center;">'
             f'<div style="background:{hexcolor}; height:14px; width:100%; '
             f'border:1px solid rgba(0,0,0,0.15);"></div>'
-            f'<div style="font-size:11px; color:#333; margin-top:2px;">{val:.0f}</div>'
+            f'<div style="font-size:11px; color:#333; margin-top:2px;">{label}</div>'
             f'</div>'
         )
 
