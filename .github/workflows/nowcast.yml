@@ -165,11 +165,17 @@ jobs:
           FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
           FTP_REMOTE_DIR: ${{ secrets.FTP_REMOTE_DIR }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq lftp
 
+          # gh's log download is unreachable from the environment these
+          # runs get diagnosed from, so on failure this surfaces the
+          # actual lftp error as a workflow annotation (visible via
+          # `gh run view`) instead of just "exit code 1" -- lftp's own
+          # output never includes the password, only the `set`/`cd`/
+          # `put`/`mv` command echoes and the server's replies.
           echo "Uploading to a throwaway remote name..."
-          lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
+          UPLOAD_OUT=$(lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate no;
@@ -177,10 +183,16 @@ jobs:
             cd $FTP_REMOTE_DIR;
             put output/storm_forecast_map.html -o storm_forecast_map.html.new;
             bye
-          " "$FTP_HOST"
+          " "$FTP_HOST" 2>&1)
+          UPLOAD_STATUS=$?
+          echo "$UPLOAD_OUT"
+          if [ $UPLOAD_STATUS -ne 0 ]; then
+            echo "::error::lftp upload step failed (exit $UPLOAD_STATUS): $(echo "$UPLOAD_OUT" | tr '\n' ' ' | head -c 800)"
+            exit 1
+          fi
 
           echo "Upload complete -- swapping it into place atomically..."
-          lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
+          SWAP_OUT=$(lftp -u "$FTP_USERNAME,$FTP_PASSWORD" -e "
             set ftp:ssl-force true;
             set ftp:ssl-protect-data true;
             set ssl:verify-certificate no;
@@ -188,4 +200,10 @@ jobs:
             cd $FTP_REMOTE_DIR;
             mv storm_forecast_map.html.new storm_forecast_map.html;
             bye
-          " "$FTP_HOST"
+          " "$FTP_HOST" 2>&1)
+          SWAP_STATUS=$?
+          echo "$SWAP_OUT"
+          if [ $SWAP_STATUS -ne 0 ]; then
+            echo "::error::lftp atomic-swap step failed (exit $SWAP_STATUS): $(echo "$SWAP_OUT" | tr '\n' ' ' | head -c 800)"
+            exit 1
+          fi
