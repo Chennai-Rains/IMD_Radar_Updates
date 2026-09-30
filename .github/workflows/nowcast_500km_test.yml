@@ -1,0 +1,53 @@
+name: One-off 500km Karaikal test build
+
+on:
+  # Manual only -- this is a one-time (or occasional, re-run-as-needed)
+  # preview build, not a recurring job. No schedule, no external pinger.
+  workflow_dispatch: {}
+
+# Deliberately NOT `permissions: contents: write` and NOT committing
+# anything back to the repo -- this is a throwaway preview build. Its own
+# archive/state live in isolated test-only directories (see
+# test_500km_pipeline.py) that are never persisted between runs; each
+# dispatch starts from a clean slate and re-fetches fresh frames. The only
+# side effect outside this job's own throwaway runner is the single
+# uploaded HTML file.
+jobs:
+  build-test-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Tesseract OCR (system package -- pytesseract just wraps this binary)
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run one-off test pipeline (Karaikal on kkl_ppz/500km, NIOT + Kochi unchanged)
+        run: python test_500km_pipeline.py
+
+      - name: Upload test map to a NEW file (does not touch the live storm_forecast_map.html)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: 21
+          protocol: ftps
+          local-dir: ./output/
+          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
+          # Only this one file exists in local-dir (test_500km_pipeline.py
+          # writes exclusively to output/storm_forecast_map_500km_test.html),
+          # so this can never overwrite the live storm_forecast_map.html
+          # sitting in the same remote directory.
+          dangerous-clean-slate: false
