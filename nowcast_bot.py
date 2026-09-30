@@ -1466,6 +1466,38 @@ def uncertainty_cone_polygon(lat: float, lon: float, speed_kmh: float, bearing_d
     return [apex] + arc_points + [apex]
 
 
+def build_bearing_arrow_icon(bearing_deg: float, color: str) -> folium.DivIcon:
+    """A small filled triangle, rotated to point along `bearing_deg` (a
+    standard compass bearing -- 0=N, 90=E, same convention project_forward
+    uses -- so it lines up with the cone drawn from the same bearing/speed
+    with no separate conversion needed).
+
+    A forecast cone alone shows an uncertainty envelope, but nothing about
+    its shape actually says "moving this way" to someone glancing at it --
+    the wide end can just as easily read as "spreading out in all these
+    directions" as "heading toward here." A small arrow along the cone's
+    own centerline removes that ambiguity in a way a color or a tooltip
+    (which nobody hovers on a public read-only page) doesn't.
+
+    Plain inline SVG in a DivIcon rather than a Leaflet plugin (e.g.
+    leaflet-polylinedecorator, the "proper" way to put arrowheads on a
+    line) deliberately -- an extra plugin means another third-party CDN
+    script this page depends on to render at all, and depending on one is
+    exactly what caused the AwesomeMarkers blank-map incident earlier.
+    This has no dependency beyond Leaflet itself, which the map can't
+    render without anyway."""
+    svg = f"""
+    <div style="transform: rotate({bearing_deg}deg); width:22px; height:22px;
+                pointer-events:none;">
+        <svg width="22" height="22" viewBox="0 0 22 22">
+            <polygon points="11,1 3,19 11,14 19,19" fill="{color}"
+                     stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+    </div>
+    """
+    return folium.DivIcon(html=svg, icon_size=(22, 22), icon_anchor=(11, 11))
+
+
 LOGO_PATH = Path(__file__).parent / "assets" / "chennairains_logo.jpg"
 
 
@@ -1819,6 +1851,25 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
                         f"({speed_kmh:.0f} km/h, bearing {bearing_deg:.0f}°)",
             ).add_to(m)
             n_projected += 1
+
+        # One direction arrow per moving cell, sitting inside the nearest
+        # (innermost) cone along its own centerline -- see
+        # build_bearing_arrow_icon's docstring for why this exists. Placed
+        # a bit past the halfway point of the SHORTEST lead time: close
+        # enough to the storm marker to clearly belong to it, far enough
+        # out to read as "this way" rather than sit on top of the marker.
+        # A fixed dark neutral color (not tied to any one lead time's
+        # color) since it needs to stay legible over all three
+        # differently-colored, semi-transparent cones it's drawn inside.
+        nearest_lead = min(lead_times_min)
+        arrow_lat, arrow_lon = project_forward(*c.centroid_latlon, speed_kmh,
+                                                bearing_deg, nearest_lead * 0.55)
+        folium.Marker(
+            location=(arrow_lat, arrow_lon),
+            icon=build_bearing_arrow_icon(bearing_deg, "#333333"),
+            tooltip=f"{label_prefix} #{c.id} heading {bearing_deg:.0f}° "
+                    f"at {speed_kmh:.0f} km/h",
+        ).add_to(m)
 
     if n_projected == 0:
         print("No cells with usable velocity yet — need at least two consecutive "
