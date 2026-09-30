@@ -5,19 +5,19 @@
       "id": 2,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.778830320148215,
-        79.28277499620395
+        9.7218856543686,
+        79.2678495928761
       ],
-      "max_dbz": 45.1,
-      "pixel_count": 36,
-      "px": 196.5,
-      "py": 394.0,
-      "range_km": 141.2,
+      "max_dbz": 44.1,
+      "pixel_count": 31,
+      "px": 194.80645161290323,
+      "py": 400.5806451612903,
+      "range_km": 147.6,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        27.7,
-        184.0
+        17.7,
+        200.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
@@ -26,44 +26,65 @@
       "id": 3,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.608647650685937,
-        79.16379820967623
+        9.595255551999438,
+        79.18614570132561
       ],
-      "max_dbz": 44.3,
-      "pixel_count": 30,
-      "px": 183.0,
-      "py": 413.6666666666667,
-      "range_km": 163.9,
+      "max_dbz": 43.6,
+      "pixel_count": 28,
+      "px": 185.53571428571428,
+      "py": 415.2142857142857,
+      "range_km": 164.2,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        16.1,
-        152.0
+        13.3,
+        145.0
       ],
-      "trend": "unknown",
+      "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
   "koc_maxz": [
     {
-      "id": 157,
+      "id": 146,
       "product": "koc_maxz",
       "centroid_latlon": [
-        9.585353187780225,
-        76.27598960101611
+        9.696921018035928,
+        76.23116407046413
       ],
-      "max_dbz": 39.1,
-      "pixel_count": 15,
-      "px": 299.3333333333333,
-      "py": 344.2,
-      "range_km": 38.0,
+      "max_dbz": 37.7,
+      "pixel_count": 12,
+      "px": 293.4166666666667,
+      "py": 329.25,
+      "range_km": 25.7,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        10.2,
-        186.0
+        12.1,
+        161.0
       ],
       "trend": "steady",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 157,
+      "product": "koc_maxz",
+      "centroid_latlon": [
+        9.566530521508918,
+        76.27430601301415
+      ],
+      "max_dbz": 42.1,
+      "pixel_count": 18,
+      "px": 299.1111111111111,
+      "py": 346.72222222222223,
+      "range_km": 40.0,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        12.6,
+        182.0
+      ],
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ]
