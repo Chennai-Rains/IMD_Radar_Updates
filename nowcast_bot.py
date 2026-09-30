@@ -621,7 +621,14 @@ def extract_kkl_time_via_templates(img: Image.Image) -> tuple[int, int, int] | N
     printed and this poll picking it up), and decoding this font's date
     line reliably would need letter templates for the month abbreviation,
     which is a lot more segmentation work for something we don't need.
-    Returns None (safe fall-back to poll-receipt time) on any ambiguity."""
+    Returns None (safe fall-back to poll-receipt time) on any ambiguity.
+
+    Called for every Karaikal product (see extract_observation_time), not
+    just kkl_maxz -- hardcoding the crop to kkl_maxz's own timestamp_bbox
+    here is safe because all Karaikal products render this same bold font
+    at this same pixel position (verified identical across kkl_maxz/
+    kkl_ppz/kkl_ppi); there's no cfg[product] equivalent to fall back to
+    if that ever stops being true for some future Karaikal product."""
     crop = img.convert("RGB").crop(PRODUCTS["kkl_maxz"]["timestamp_bbox"])
     arr = np.array(crop)
     big = cv2.resize(arr, (arr.shape[1] * 5, arr.shape[0] * 5), interpolation=cv2.INTER_CUBIC)
@@ -674,8 +681,25 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     NIOT and the fallback for Karaikal if template matching can't
     confidently read a frame. A miss falls back to poll-receipt time same
     as always, so this never blocks the pipeline, just loses timestamp
-    precision for that frame."""
-    if product == "kkl_maxz":
+    precision for that frame.
+
+    All Karaikal products share this same bold font AND the same
+    timestamp_bbox pixel position (verified: kkl_maxz/kkl_ppz/kkl_ppi are
+    all identical, (715, 218, 880, 262) on an 880x720 frame -- it's shared
+    UI chrome around the plot, not something that moves per-product), so
+    the template-matching path applies to any of them, not just kkl_maxz.
+    This was first caught as a real bug, not just a theoretical gap: when
+    kkl_ppz was polled for the first time in a test build, its date came
+    back 10 days stale ("20 Sep" instead of "30 Sep") while the time-of-
+    day was read correctly -- a single 3-misread-as-2 digit, exactly the
+    known failure mode this template path exists to avoid, silently
+    accepted because the generic OCR fallback below only sanity-checks the
+    YEAR, not the day. Routing every Karaikal product through the
+    template path sidesteps the date line's OCR entirely (see that
+    function's docstring for why), which is the actual fix; the loosened
+    generic-path sanity check further down is a second line of defense
+    for whatever other product hits a similar single-digit miss."""
+    if PRODUCT_RADAR.get(product) == "karaikal":
         hms = extract_kkl_time_via_templates(img)
         if hms is not None:
             h, m, s = hms
@@ -729,11 +753,19 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
         return None
     dt = dt.replace(tzinfo=timezone.utc)
     # OCR sanity check: a single misread digit can still parse as a valid
-    # (wrong) date/time (e.g. "2096" instead of "2026" — observed on a
-    # Karaikal test frame). A year far from "now" means OCR got a digit
-    # wrong, not that the frame is actually from a different year —
-    # falling back to poll-receipt time is safer than trusting it.
-    if abs(dt.year - datetime.now(timezone.utc).year) > 1:
+    # (wrong) date/time (e.g. "2096" instead of "2026", or "20 Sep" instead
+    # of "30 Sep" — both observed on real Karaikal-font frames) without
+    # ever looking obviously malformed. These are near-real-time radar
+    # scans; a genuine frame is always within minutes of "now", so any
+    # multi-day gap means OCR misread a digit, not that IMD served a stale
+    # frame from a different day — falling back to poll-receipt time is
+    # safer than trusting it. Wide enough (days, not hours) to never
+    # false-positive on ordinary network/poll lag, tight enough to catch
+    # a wrong day-of-month the same way the old year-only version caught a
+    # wrong year (that check only ever fired on a wrong-decade misread —
+    # this generalizes it down to the much more common single-digit-in-
+    # the-date-field case, like the one that motivated this comment).
+    if abs((dt - datetime.now(timezone.utc)).total_seconds()) > 3 * 86400:
         return None
     return dt
 
