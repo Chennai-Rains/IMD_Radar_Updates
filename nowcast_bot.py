@@ -264,6 +264,18 @@ PRODUCTS = {
         "elevation_bbox": (715, 188, 880, 206),
         "plot_bbox": (0, 0, 720, 720),
         "cell_dbz_threshold": 30,
+        # When shown alongside kkl_maxz (the higher-resolution 250km
+        # Karaikal product -- see test_500km_pipeline.py), this product's
+        # own pixels out to 250km are redundant AND lower-resolution than
+        # kkl_maxz's -- ceding that inner disc to kkl_maxz and only
+        # showing this product's genuinely EXTRA coverage (250-500km, the
+        # ring kkl_maxz's own image simply doesn't reach) gives the best
+        # of both: full resolution close in, real extended range further
+        # out, instead of the coarser PPZ image overwriting/competing with
+        # the sharper MAXZ one in the region they both cover. See
+        # decode_reflectivity's use of this field. No effect when kkl_ppz
+        # is shown on its own (e.g. without kkl_maxz alongside it).
+        "mask_within_km": 250.0,
         "label_exclude_boxes": [
             (168, 40, 193, 57), (527, 40, 553, 57), (347, 64, 373, 81),
             (239, 164, 265, 181), (455, 164, 481, 181), (98, 208, 124, 225),
@@ -947,6 +959,24 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
     if static_mask is not None:
         dbz[static_mask] = np.nan
 
+    mask_within_km = cfg.get("mask_within_km")
+    if mask_within_km is not None:
+        # See PRODUCTS[...]["mask_within_km"]'s comment -- cedes this
+        # product's inner disc to a higher-resolution product covering the
+        # same ground (e.g. kkl_ppz ceding 0-250km to kkl_maxz). site_px is
+        # full-image pixel coordinates (same frame pixel_to_latlon uses),
+        # so it's offset back by plot_bbox's own origin (l, t) to land in
+        # THIS array's local (row, col) space before measuring distance in
+        # pixels and converting to km via km_per_px -- exactly the same
+        # site-relative geometry pixel_to_latlon uses, just without the
+        # extra round trip through lat/lon since this is a plain circular
+        # cutoff, not a shape that needs the real map projection.
+        site_x, site_y = cfg["site_px"]
+        km_per_px = cfg["km_per_px"]
+        yy, xx = np.mgrid[0:h, 0:w]
+        dist_km = np.hypot(xx - (site_x - l), yy - (site_y - t)) / km_per_px
+        dbz[dist_km < mask_within_km] = np.nan
+
     return dbz
 
 
@@ -1284,7 +1314,12 @@ PRODUCT_STYLE = {
     "maxz": {"color": "#ff7f0e", "label": "NIOT MAXZ - aloft / building"},
     "ppz":  {"color": "#1f77b4", "label": "NIOT PPZ - regional awareness"},
     "kkl_ppi": {"color": "#9467bd", "label": "Karaikal PPI - surface confirmed"},
-    "kkl_ppz": {"color": "#17becf", "label": "Karaikal PPZ - regional awareness"},
+    # "Karaikal Extended Radar" -- named for what a viewer actually sees:
+    # with mask_within_km set on this product (see PRODUCTS[...]), it only
+    # ever renders the 250-500km ring kkl_maxz's own image can't reach,
+    # never the inner disc, so "extended" describes the visible result
+    # whenever it's shown alongside kkl_maxz (the normal case).
+    "kkl_ppz": {"color": "#17becf", "label": "Karaikal Extended Radar"},
     "kkl_maxz": {"color": "#8c564b", "label": "Karaikal MAXZ - aloft / building"},
     "koc_maxz": {"color": "#2ca02c", "label": "Kochi MAXZ - aloft / building"},
 }
