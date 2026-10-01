@@ -1772,6 +1772,33 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
     return masked
 
 
+def _collapsible_panel_toggle_js(body_id: str, chevron_id: str) -> str:
+    """Inline onclick handler (NOT a <script> tag -- see
+    build_autorefresh_script's docstring for why a literal nested
+    <script>...</script> inside folium's one shared script block is
+    dangerous; an onclick attribute carries no such risk) shared by every
+    floating panel that collapses to a compact header on narrow screens.
+
+    Reads the body's CURRENT rendered state via getComputedStyle rather
+    than tracking open/closed in a separate JS variable -- that way one
+    piece of logic correctly handles both starting points a panel can be
+    in: expanded (desktop/tablet, nothing overrides the browser default
+    block display) or collapsed (phones, via each panel's own @media rule
+    hiding the body by id). Toggling by directly setting .style.display
+    afterwards always wins over that stylesheet rule regardless of
+    viewport width, which is exactly "hide and show" rather than a fixed
+    mobile/desktop split: a reader on a phone can still tap a panel open
+    to read it, same as a reader on a laptop can collapse one out of the
+    way."""
+    return (
+        f"var b=document.getElementById('{body_id}');"
+        f"var open=getComputedStyle(b).display!=='none';"
+        f"b.style.display=open?'none':'block';"
+        f"var c=document.getElementById('{chevron_id}');"
+        f"if(c)c.innerHTML=open?'&#9656;':'&#9662;';"
+    )
+
+
 def build_dbz_legend_html(products: tuple) -> str:
     """A floating color-scale legend (swatches + value ticks), the same
     idea as the mm/h bar on rain-radar apps -- so a viewer can read a
@@ -1779,7 +1806,14 @@ def build_dbz_legend_html(products: tuple) -> str:
     Each swatch is one flat band from DBZ_BAND_COLORS via
     dbz_colormap_and_norm, the SAME shared definition dbz_array_to_png
     uses, so the legend is never just an approximation of what's drawn --
-    it's literally the same bins."""
+    it's literally the same bins.
+
+    The swatch row collapses to just its header on narrow screens (see
+    the @media rule below) -- on a phone this (plus the info banner,
+    collapsed the same way by build_info_banner_html) was covering enough
+    of the map that the reflectivity underneath wasn't usable, reported
+    directly against a real screenshot. The header stays tappable to
+    expand it back -- this is "hide and show", not "remove on mobile"."""
     vmin, vmax = product_value_range(products[0])  # legend reflects the primary displayed product's scale
     cmap, norm, boundaries = dbz_colormap_and_norm(products[0])
 
@@ -1798,15 +1832,30 @@ def build_dbz_legend_html(products: tuple) -> str:
         )
 
     label = " / ".join(PRODUCT_STYLE[p]["label"].split(" - ")[0] for p in products)
+    toggle_js = _collapsible_panel_toggle_js("nowcast-legend-body", "nowcast-legend-chevron")
     return f"""
+    <style>
+      @media (max-width: 600px) {{
+        #nowcast-legend-body {{ display: none; }}
+      }}
+    </style>
     <div style="position: fixed; bottom: 24px; left: 24px; z-index: 9999;
-                background: rgba(255,255,255,0.92); padding: 10px 14px;
-                border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
-                font-family: -apple-system, Arial, sans-serif;">
-        <div style="font-size: 12px; font-weight: 600; color: #222; margin-bottom: 6px;">
-            {label} — reflectivity (dBZ)
+                max-width: min(300px, calc(100vw - 48px));
+                background: rgba(255,255,255,0.92); border-radius: 8px;
+                box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+                font-family: -apple-system, Arial, sans-serif; overflow: hidden;">
+        <div onclick="{toggle_js}"
+             style="display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+                    cursor: pointer; user-select: none;">
+            <div style="font-size: 12px; font-weight: 600; color: #222; flex: 1; min-width: 0;
+                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                {label} — reflectivity (dBZ)
+            </div>
+            <div id="nowcast-legend-chevron" style="color: #888; font-size: 10px; flex-shrink: 0;">&#9662;</div>
         </div>
-        <div style="display:flex; width: 260px;">{swatches}</div>
+        <div id="nowcast-legend-body" style="padding: 0 14px 10px 14px;">
+            <div style="display:flex; width: 260px; max-width: calc(100vw - 76px);">{swatches}</div>
+        </div>
     </div>
     """
 
@@ -1907,7 +1956,15 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
     The ChennaiRains logo sits inline in this same box, next to the title --
     previously it floated on its own over the top-left corner, where it sat
     on top of Leaflet's zoom control. Anchoring it here instead keeps it
-    away from any map control regardless of screen size."""
+    away from any map control regardless of screen size.
+
+    The time list + disclaimer collapse to just the header row (logo +
+    title) on narrow screens -- with 5-6 radars/products listed (NIOT,
+    Karaikal, Karaikal Extended, Kochi, Chennai DWR, Chennai Extended) this
+    banner got tall enough on a phone to cover a real chunk of the map
+    itself, reported directly against a screenshot. Tapping the header
+    still expands it -- same "hide and show" toggle build_dbz_legend_html
+    uses for the same reason, via the shared _collapsible_panel_toggle_js."""
     ist = ZoneInfo("Asia/Kolkata")
     now_utc = datetime.now(timezone.utc)
     lines = []
@@ -1943,22 +2000,34 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
             lines.append(f"{label}: time unavailable")
     times_html = "<br>".join(lines)
     logo_tag = build_logo_tag()
+    toggle_js = _collapsible_panel_toggle_js("nowcast-info-body", "nowcast-info-chevron")
     return f"""
+    <style>
+      @media (max-width: 600px) {{
+        #nowcast-info-body {{ display: none; }}
+      }}
+    </style>
     <div style="position: fixed; top: 12px; right: 12px; z-index: 9999;
-                background: rgba(255,255,255,0.92); padding: 8px 12px;
-                border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+                max-width: min(230px, calc(100vw - 24px));
+                background: rgba(255,255,255,0.92); border-radius: 8px;
+                box-shadow: 0 1px 6px rgba(0,0,0,0.3);
                 font-family: -apple-system, Arial, sans-serif; font-size: 11px;
-                color: #333; max-width: 230px; line-height: 1.5;">
-        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                color: #333; line-height: 1.5; overflow: hidden;">
+        <div onclick="{toggle_js}"
+             style="display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+                    cursor: pointer; user-select: none;">
             {logo_tag}
-            <div style="font-weight: 700; color: #b45309;">
+            <div style="font-weight: 700; color: #b45309; flex: 1;">
                 &#9888; Experimental nowcast
             </div>
+            <div id="nowcast-info-chevron" style="color: #888; font-size: 10px; flex-shrink: 0;">&#9662;</div>
         </div>
-        <div style="margin-bottom: 4px;">{times_html}</div>
-        <div style="font-size: 10px; color: #666;">
-            Based on IMD radar imagery. Not an official forecast.<br>
-            Auto-refreshes every {AUTOREFRESH_MINUTES} min.
+        <div id="nowcast-info-body" style="padding: 0 12px 8px 12px;">
+            <div style="margin-bottom: 4px;">{times_html}</div>
+            <div style="font-size: 10px; color: #666;">
+                Based on IMD radar imagery. Not an official forecast.<br>
+                Auto-refreshes every {AUTOREFRESH_MINUTES} min.
+            </div>
         </div>
     </div>
     """
