@@ -96,6 +96,82 @@ in the NE).
 
 This is production-only — the 500km test repo doesn't build a radar loop.
 
+## Minimizing server load from idle/inactive viewers
+
+Three things keep a browser tab left open on this site from costing
+server resources for no reason, on top of each other:
+
+1. **The auto-refresh pauses when the tab isn't visible.**
+   `storm_forecast_map.html`'s reload timer (`build_autorefresh_script()`
+   in `nowcast_bot.py`) now uses the Page Visibility API: a backgrounded
+   or minimized tab makes zero requests while hidden, and reloads once
+   immediately on becoming visible again if it's gone stale, or arms a
+   timer for whatever time is left otherwise. There's no persistent
+   per-visitor connection to a static file host to "close" the way there
+   would be for a chat or streaming server — not making the request in
+   the first place while nobody's looking is the real equivalent of that
+   for a page like this one.
+2. **It also stops for a visible-but-abandoned tab.** If there's been no
+   mouse/touch/keyboard/scroll/click activity for
+   `AUTOREFRESH_IDLE_TIMEOUT_MINUTES` (60), the tab stops reloading even
+   though it's technically still on-screen (e.g. a monitor left on) —
+   and picks back up the moment there's any activity again.
+3. **`.htaccess` sets `Cache-Control` on every published file**, matched
+   to how often it actually changes (5 min for the live map, 15 min for
+   the radar loop) — see that file's own comments. This both lets
+   browsers skip a request entirely when their own cached copy is still
+   fresh, and (see below) is what lets Cloudflare cache the GIFs at the
+   edge.
+
+## Cloudflare caching
+
+`plots.chennairains.com` is proxied through Cloudflare, which is a much
+bigger lever on origin load than anything client-side above: if 50
+people load the live map in the same few minutes, a properly cached edge
+can serve 49 of those without this cPanel server seeing a request at
+all. Two things make that work:
+
+**Images are already covered.** Cloudflare caches common static file
+types (including `.gif`) at the edge by default, honoring the origin's
+`Cache-Control` header for how long — which `.htaccess` now sets. No
+dashboard change needed for the radar-loop GIFs.
+
+**HTML needs an explicit Cache Rule.** Cloudflare does NOT cache `.html`
+by default, regardless of `Cache-Control` — so `storm_forecast_map.html`
+and `radar_loop.html` currently bypass Cloudflare's cache entirely on
+every single visit, `Cache-Control` header or not. One-time setup, in
+the Cloudflare dashboard for this zone:
+
+1. **Caching → Cache Rules** (or **Rules → Page Rules** on an older
+   dashboard) → create a rule.
+2. Match: `hostname equals plots.chennairains.com` AND
+   `URI Path equals /storm_forecast_map.html` — add a second rule the
+   same way for `/radar_loop.html` (Cache Rules match one condition set
+   per rule; two simple rules are easier to reason about than one
+   combined one here).
+3. Cache eligibility: **Eligible for cache** (this is the setting that
+   overrides HTML's default bypass).
+4. Edge TTL: **Respect origin headers** — since `.htaccess` now sends a
+   real `Cache-Control`, Cloudflare will use exactly that (5 min / 15 min)
+   rather than needing a separately-maintained TTL in two places.
+
+**Keeping it fresh after every deploy.** Once that Cache Rule exists, a
+viewer could be served an edge-cached copy for up to its TTL after a
+fresh upload. `nowcast.yml`'s "Purge Cloudflare cache" step (right after
+the FTP upload) purges exactly those 5 URLs on every run, so Cloudflare
+still serves the newest build within seconds, not minutes — it only
+needs two more repo secrets to activate (it's a safe no-op without
+them):
+
+| Secret | Where to get it |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → **My Profile → API Tokens → Create Token** → use the **Edit zone DNS** template as a base but you only need the **Zone → Cache Purge → Purge** permission, scoped to this one zone (`chennairains.com`) |
+| `CLOUDFLARE_ZONE_ID` | Cloudflare dashboard → select the `chennairains.com` zone → right sidebar, **Zone ID** (just a value to copy, not a secret you create) |
+
+Add both under this repo's **Settings → Secrets and variables → Actions**,
+same as the FTP secrets above — the purge step picks them up on the very
+next run with no other change needed.
+
 ## Running locally
 
 ```bash

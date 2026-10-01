@@ -1,0 +1,32 @@
+# Cache-Control for the files this repo publishes to
+# plots.chennairains.com, matched to how often each one actually changes
+# -- see nowcast_bot.py's publish_radar_loop()/run_pipeline() for how
+# this file gets copied into output/ (and hence re-uploaded) every cycle
+# alongside the content it describes.
+#
+# This also matters beyond the browser: Cloudflare (this site is proxied
+# through it) honors an origin's Cache-Control for the static file types
+# it caches by default (images), so this header is what lets Cloudflare
+# itself hold the radar-loop GIFs at the edge instead of hitting this
+# origin server on every visitor -- see the repo README's "Cloudflare
+# caching" section for the Cache Rule needed to get the same edge
+# caching for the two HTML pages, which Cloudflare does NOT cache by
+# default regardless of this header.
+<IfModule mod_headers.c>
+  # The live storm map -- rebuilt every ~15 min, browser tab auto-
+  # refreshes every 10 (see AUTOREFRESH_MINUTES); 5 min keeps a cached
+  # copy from ever being more than one upload cycle stale. Note: the
+  # map's own reflectivity-raster overlays aren't separate uploaded
+  # files -- folium's ImageOverlay inlines them as base64 data URIs
+  # straight into this HTML -- so this one rule covers them too.
+  <FilesMatch "^storm_forecast_map\.html$">
+    Header set Cache-Control "public, max-age=300"
+  </FilesMatch>
+
+  # The radar-loop page + its three GIFs -- only rebuilt once an hour
+  # (see RADAR_LOOP_DIR/publish_radar_loop's hourly gate), so a longer
+  # TTL doesn't risk showing anything staler than the content already is.
+  <FilesMatch "^radar_loop(_3h|_6h|_12h)?\.(html|gif)$">
+    Header set Cache-Control "public, max-age=900"
+  </FilesMatch>
+</IfModule>

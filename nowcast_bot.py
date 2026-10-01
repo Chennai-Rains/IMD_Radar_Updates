@@ -650,6 +650,14 @@ ELEVATED_BEAM_THRESHOLD_KM = 1.5
 # on exactly the same moment as an in-progress upload every single cycle.
 AUTOREFRESH_MINUTES = 10
 
+# A tab left open and VISIBLE but genuinely unattended (monitor left on,
+# browser forgotten in a window nobody's looked at) still shouldn't poll
+# the server forever -- see build_autorefresh_script()'s visibility+idle
+# handling below. 60 min is deliberately generous: this only stops an
+# abandoned tab from refreshing, never a tab someone's actually glanced
+# at within the last hour.
+AUTOREFRESH_IDLE_TIMEOUT_MINUTES = 60
+
 # How old a product's displayed observation time has to be before
 # build_info_banner_html() flags it as stale instead of showing it with
 # plain styling -- see that function for why this matters (a reader can't
@@ -1956,7 +1964,8 @@ def build_info_banner_html(products: tuple, last_obs_time_seen: dict) -> str:
     """
 
 
-def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES) -> str:
+def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES,
+                              idle_timeout_minutes: int = AUTOREFRESH_IDLE_TIMEOUT_MINUTES) -> str:
     """This is a static HTML file re-uploaded on a schedule -- a browser
     tab left open on it otherwise just sits on whatever was live at the
     moment it was opened, with no way to know a newer map has since been
@@ -1966,14 +1975,26 @@ def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES) -> str
     ~15 min, this just makes sure an already-open tab actually picks that
     up instead of going stale in the background.
 
-    Deliberately a plain JS reload, not a <meta http-equiv="refresh">:
-    the meta-refresh timer is anchored to when the browser PARSED the
-    page, which can lag noticeably behind when the tab actually became
-    visible to the reader (e.g. a page pre-loaded in a background tab);
-    this script's timer starts from the same moment, but since it's easy
-    to swap for a visibility-aware version later (only start counting
-    once the tab is actually visible) if that ever turns out to matter,
-    plain JS is kept here as the more extensible starting point.
+    Visibility- and idle-aware (an earlier version was plain
+    setTimeout(reload, interval) regardless of whether the tab was even
+    being looked at -- this docstring used to note that swapping in a
+    visibility-aware version later would be easy "if that ever turns out
+    to matter"; it did, see the server-load discussion that prompted
+    this): a backgrounded/minimized tab doesn't poll the server AT ALL
+    while hidden -- there's no persistent per-viewer connection to a
+    static file host to "close", so not making the request in the first
+    place is the real equivalent. The moment the tab becomes visible
+    again, it reloads immediately if a full interval has already elapsed
+    while hidden (so the reader never sees stale data), or otherwise
+    arms a timer for whatever time is left. On top of that, a tab that's
+    visible but genuinely unattended (no mouse/touch/key/scroll/click
+    for idle_timeout_minutes) also stops reloading until it sees
+    activity again -- catches "left open on a monitor nobody's at",
+    which plain visibility alone wouldn't.
+
+    Deliberately still a plain JS timer, not a <meta http-equiv="refresh">:
+    a meta-refresh can't be paused/resumed based on visibility or
+    activity at all, which is the entire point here.
 
     interval_minutes is deliberately NOT the same 15 as the upload cron --
     a little offset (see AUTOREFRESH_MINUTES) means a reload landing
@@ -1997,9 +2018,52 @@ def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES) -> str
     That's a real regression this function caused once already: it broke
     the whole map (blank page, only the plain-HTML overlays like the
     banner/legend/watermark still rendered, since those go through
-    .html, not .script) while looking completely fine in isolation."""
+    .html, not .script) while looking completely fine in isolation. The
+    IIFE below is one statement, same single-nested-function shape as
+    before, for the same reason."""
     interval_ms = interval_minutes * 60 * 1000
-    return f"setTimeout(function() {{ window.location.reload(); }}, {interval_ms});"
+    idle_ms = idle_timeout_minutes * 60 * 1000
+    return f"""(function() {{
+  var INTERVAL_MS = {interval_ms};
+  var IDLE_MS = {idle_ms};
+  var loadTime = Date.now();
+  var lastActivity = Date.now();
+  var timer = null;
+
+  function markActive() {{ lastActivity = Date.now(); }}
+  ['mousemove', 'keydown', 'touchstart', 'scroll', 'click'].forEach(function(evt) {{
+    document.addEventListener(evt, markActive, {{passive: true}});
+  }});
+
+  function isIdle() {{ return (Date.now() - lastActivity) > IDLE_MS; }}
+
+  function clearTimer() {{
+    if (timer) {{ clearTimeout(timer); timer = null; }}
+  }}
+
+  function armTimer() {{
+    clearTimer();
+    if (document.visibilityState !== 'visible' || isIdle()) return;
+    var remaining = Math.max(INTERVAL_MS - (Date.now() - loadTime), 0);
+    timer = setTimeout(function() {{ window.location.reload(); }}, remaining);
+  }}
+
+  document.addEventListener('visibilitychange', function() {{
+    if (document.visibilityState !== 'visible') {{ clearTimer(); return; }}
+    if (Date.now() - loadTime >= INTERVAL_MS) {{ window.location.reload(); }}
+    else {{ armTimer(); }}
+  }});
+
+  // No single event fires purely from time passing without interaction,
+  // so poll once a minute to notice "just went idle" (stop the timer)
+  // or "just became active again after being idle" (re-arm it).
+  setInterval(function() {{
+    if (isIdle()) {{ clearTimer(); }}
+    else if (!timer && document.visibilityState === 'visible') {{ armTimer(); }}
+  }}, 60000);
+
+  armTimer();
+}})();"""
 
 
 def build_fallback_logo_html() -> str:
@@ -3161,6 +3225,16 @@ def run_pipeline() -> None:
     capture_mosaic_frame()
     publish_radar_loop(rebuild=datetime.now(timezone.utc).minute < 15)
     print("Updated radar loop (3h/6h/12h)")
+
+    # .htaccess (Cache-Control headers -- see that file's own comments)
+    # needs to land in output/ on EVERY cycle too, for the same reason
+    # radar_loop/'s files do: output/ is empty on every fresh checkout,
+    # and FTP-Deploy-Action deletes any remote file missing from a run's
+    # local-dir. It's static (committed, not generated), so this is a
+    # plain copy, not a rebuild.
+    htaccess_src = Path(".htaccess")
+    if htaccess_src.exists():
+        (OUTPUT_HTML.parent / ".htaccess").write_bytes(htaccess_src.read_bytes())
 
 
 if __name__ == "__main__":
