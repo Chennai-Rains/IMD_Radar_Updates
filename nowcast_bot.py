@@ -2722,7 +2722,7 @@ MOSAIC_FRAMES_DIR = Path("mosaic_frames")
 RADAR_LOOP_DIR = Path("radar_loop")          # persisted (committed) -- see module docstring above
 RADAR_LOOP_WINDOWS_HOURS = (3, 6, 12)
 MOSAIC_RETAIN_HOURS = 13.0                   # 12h window + 1h slack for a late/skipped cycle
-GIF_FRAME_DURATION_MS = 300
+GIF_FRAME_DURATION_MS = 1000   # ~1 fps -- 300ms played too fast to read a storm's actual movement
 
 
 def _mercator_px(lon: float, lat: float, zoom: int) -> tuple[float, float]:
@@ -2870,18 +2870,32 @@ def render_mosaic_frame(products: tuple, capture_time: datetime) -> Image.Image:
         cx, cy = mosaic_lonlat_to_px(site["site_lon"], site["site_lat"])
         draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(30, 60, 150, 255), outline=(255, 255, 255, 255), width=1)
 
-    # Plain hyphen, not an em-dash -- ImageFont.load_default()'s built-in
-    # bitmap font has no glyph for it and silently renders mojibake instead.
+    # Plain hyphen, not an em-dash -- the default bitmap font (and some
+    # fallback fonts) has no glyph for it and silently renders mojibake
+    # instead.
     caption = f"Chennai Rains radar - {capture_time.strftime('%Y-%m-%d %H:%M')} UTC"
     try:
+        # size= (Pillow 9.2+) scales PIL's own bundled font -- no system
+        # font file dependency, so this is identical on this dev sandbox
+        # and the GitHub Actions runner. The original bare
+        # load_default() is a fixed ~10px bitmap font: fine on a frame
+        # viewed at its native 1024px, but unreadable once a GIF this
+        # size gets shown at a smaller display width on the page --
+        # exactly what was reported ("incorporate the timestamps" really
+        # meant "make them legible"). 34px reads clearly even scaled down
+        # for a phone-width page.
+        font = ImageFont.load_default(size=34)
+    except TypeError:
+        # Pillow <9.2 -- no size= param at all. Fall back to the tiny
+        # bitmap font rather than erroring the whole render.
         font = ImageFont.load_default()
     except Exception:
         font = None
     text_bbox = draw.textbbox((0, 0), caption, font=font) if font else (0, 0, len(caption) * 6, 11)
-    pad = 6
+    pad = 10
     draw.rectangle([4, base.height - (text_bbox[3] - text_bbox[1]) - pad * 2 - 4,
                     4 + (text_bbox[2] - text_bbox[0]) + pad * 2, base.height - 4],
-                   fill=(0, 0, 0, 150))
+                   fill=(0, 0, 0, 170))
     draw.text((4 + pad, base.height - (text_bbox[3] - text_bbox[1]) - pad - 4), caption,
                fill=(255, 255, 255, 255), font=font)
 
@@ -2937,8 +2951,13 @@ RADAR_LOOP_HTML_TEMPLATE = """<!doctype html>
          font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }}
   h1 {{ text-align: center; font-size: 1.3em; margin: 0 0 4px; }}
   p.sub {{ text-align: center; color: #9fb0c3; margin: 0 0 24px; font-size: 0.9em; }}
-  .loops {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; max-width: 1400px; margin: 0 auto; }}
-  figure {{ margin: 0; background: #121b2e; border-radius: 10px; padding: 10px; flex: 1 1 380px; max-width: 440px; }}
+  /* Stacked top-to-bottom, not side-by-side -- each loop gets the full
+     page width instead of being squeezed to a third of it, so the
+     reflectivity/range-circle detail (and the timestamp burned into
+     each frame) actually reads at a glance instead of needing a
+     click-to-zoom. */
+  .loops {{ display: flex; flex-direction: column; align-items: center; gap: 32px; max-width: 1100px; margin: 0 auto; }}
+  figure {{ margin: 0; background: #121b2e; border-radius: 10px; padding: 10px; width: 100%; }}
   figure img {{ width: 100%; height: auto; border-radius: 6px; display: block; }}
   figcaption {{ text-align: center; margin-top: 8px; font-weight: 600; color: #cdd9e8; }}
   a {{ color: #7fb2ff; }}
