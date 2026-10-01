@@ -3097,7 +3097,7 @@ RADAR_LOOP_HTML_TEMPLATE = """<!doctype html>
 </head>
 <body>
   <h1>Chennai Rains Radar Loop</h1>
-  <p class="sub">Fused NIOT + Karaikal + Kochi reflectivity · updated hourly · {generated}</p>
+  <p class="sub">Fused NIOT + Karaikal + Kochi reflectivity · updated every ~10 min · {generated}</p>
   <div class="loops">
     {figures}
   </div>
