@@ -2197,11 +2197,18 @@ def build_home_button_html() -> str:
     a bookmark/shared link. Deliberately separate from the small logo icon
     (build_logo_tag/build_fallback_logo_html), which points at the main
     chennairains.com site instead -- this is "back to the forecasts I was
-    just browsing", not "back to the blog homepage". Bottom-center, clear
-    of the legend (bottom-left) and info banner/logo (top-right)."""
+    just browsing", not "back to the blog homepage". Bottom-right,
+    mirroring the legend's bottom-left position -- this used to sit
+    bottom-center instead, which put it directly on top of the legend's
+    header text on narrow screens (the legend collapsing to a slim header
+    bar made this visibly overlap rather than just partially cover the
+    swatches underneath, reported directly against a screenshot). Bottom-
+    right keeps it clear of both the legend (bottom-left) and the info
+    banner/logo (top-right) at any screen width, without the two needing
+    to know about each other's height."""
     return """
     <a href="https://plots.chennairains.com/index.html"
-       style="position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+       style="position: fixed; bottom: 24px; right: 24px;
               z-index: 9999; background: rgba(30,30,30,0.85); color: #fff;
               font-family: -apple-system, Arial, sans-serif; font-size: 13px;
               font-weight: 600; padding: 9px 16px; border-radius: 999px;
