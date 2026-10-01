@@ -142,7 +142,7 @@ PRODUCT_RADAR = {
     "ppi": "niot", "maxz": "niot", "ppz": "niot",
     "kkl_ppi": "karaikal", "kkl_ppz": "karaikal", "kkl_maxz": "karaikal",
     "koc_maxz": "kochi",
-    "cni_maxz": "chennai",
+    "cni_maxz": "chennai", "cni_ppz": "chennai",
 }
 
 EFFECTIVE_EARTH_RADIUS_KM = 8494.0  # standard 4/3-Earth-radius model
@@ -525,6 +525,70 @@ PRODUCTS = {
             (102, 153, 204), (102, 204, 204), (153, 153, 204), (153, 204, 204),
         ],
     },
+
+    # Chennai's own 500km-class extended-range product (printed "Range: 600
+    # km", actually better reach than Karaikal's kkl_ppz) -- a single-tilt
+    # PPI (elevation -0.2deg, printed directly), not a column-max product,
+    # unlike cni_maxz. Same hybrid intent as kkl_maxz+kkl_ppz: this product
+    # cedes its own inner 250km disc to cni_maxz's higher resolution via
+    # mask_within_km, contributing only the 250-600km ring cni_maxz's own
+    # image can't reach.
+    "cni_ppz": {
+        "url": "https://mausam.imd.gov.in/Radar/ppz_cni.gif",
+        "role": "regional_early_warning",
+        "range_km": 600.0,         # printed directly ("Range: 600 km") -- genuinely more reach than Karaikal's 500km kkl_ppz
+        "elevation_deg": -0.2,     # printed directly ("Elevation: -0.2 deg") -- a real single low-angle tilt, not a column-max product
+        "image_size": (1014, 800),
+        # Full lat/lon-gridded single-panel layout (like cni_maxz/koc_maxz,
+        # but no cross-section strips -- this is one plan-view panel filling
+        # most of the frame, legend down the right side). site_px measured
+        # the same way as cni_maxz: fit this frame's OWN lat/lon gridlines
+        # (75-83 degE across the top, 8-18 degN down the left), then used
+        # that fit to locate RADAR_SITES["chennai"]'s already-established
+        # site_lat/site_lon in THIS image's pixel space -- same physical
+        # radar as cni_maxz, so the real-world coordinate has to be
+        # identical; cross-checked against the frame's own (noisy, overlaid
+        # by coastline/labels right at the site) crosshair marker and landed
+        # within a few px, consistent with each other.
+        "site_px": (392.6, 395.3),
+        "km_per_px": 1.500,        # frame's own metadata prints "Resolution: 1.500 km/pixel" -- confirmed independently via the gridline fit on both axes (within ~1.5%)
+        "colorbar_bbox": (820, 74, 884, 525),
+        "value_at_top": 60.0,      # same uniform 2.5dB/band MAX(dBZ) scale as every other product here
+        "value_at_bottom": 20.0,
+        "timestamp_bbox": (780, 27, 1014, 50),
+        "elevation_bbox": (780, 690, 1014, 702),
+        "plot_bbox": (0, 0, 799, 800),
+        "cell_dbz_threshold": 30,  # matches kkl_ppz -- the other long-range PPZ-style product
+        # Ceding its own inner 250km disc to cni_maxz, exactly like
+        # kkl_ppz ceding to kkl_maxz -- see that field's comment on
+        # kkl_ppz above for the full reasoning. Labeled "Chennai Extended
+        # Radar" on the page (PRODUCT_STYLE), same naming pattern as
+        # Karaikal's masked product.
+        "mask_within_km": 250.0,
+        # Same open-water texture-collision risk as cni_maxz (same vendor
+        # software/palette, same symptom expected) -- starting from
+        # cni_maxz's own measured exclude_colors/despeckle_min_px as a
+        # first pass. Verified directly against this product's own real
+        # frame: with these in place, decode_reflectivity() dropped from
+        # a sea-wide false-echo field down to 207 finite px out of 639,200
+        # (and 10 spurious "cells"), ALL of them clustered at
+        # x:733-779, y:723-783 in plot_bbox-relative coords -- sampling
+        # those exact pixels' RGB (pale yellow/white/pale green/pale pink)
+        # and visually inspecting that crop confirmed it's the IMD
+        # national emblem (Ashoka lion seal + orange/green ribbon),
+        # printed over open water just south-east of the site, same
+        # confound cni_maxz needed its own label_exclude_boxes entry for.
+        # No genuine echo was lost to this -- the whole affected region is
+        # a static graphic, not sea surface.
+        "despeckle_min_px": 8,
+        "exclude_colors": [
+            (102, 204, 255), (153, 204, 255), (102, 153, 255), (153, 153, 255),
+            (102, 153, 204), (102, 204, 204), (153, 153, 204), (153, 204, 204),
+        ],
+        "label_exclude_boxes": [
+            (705, 685, 799, 800),   # national emblem/seal, bottom-right of the plot panel
+        ],
+    },
 }
 
 POLL_SECONDS = 120
@@ -603,7 +667,7 @@ STALE_OBS_MINUTES = 60
 # not product, since a cell's product can be either of Karaikal's two.
 # Radars not listed here (niot, kochi) are unrestricted — this is currently
 # a Karaikal-only concern.
-ARROW_MAX_RANGE_KM = {"karaikal": 250.0}
+ARROW_MAX_RANGE_KM = {"karaikal": 250.0, "chennai": 250.0}
 
 # === CELL 6 (georeferencing) ===
 def site_for(product: str) -> dict:
@@ -1524,6 +1588,7 @@ PRODUCT_STYLE = {
     "kkl_maxz": {"color": "#8c564b", "label": "Karaikal MAXZ - aloft / building"},
     "koc_maxz": {"color": "#2ca02c", "label": "Kochi MAXZ - aloft / building"},
     "cni_maxz": {"color": "#e377c2", "label": "Chennai DWR MAXZ - aloft / building"},
+    "cni_ppz": {"color": "#7f7f7f", "label": "Chennai Extended Radar"},
 }
 
 RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR",
