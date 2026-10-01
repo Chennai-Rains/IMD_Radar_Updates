@@ -111,12 +111,38 @@ RADAR_SITES = {
                                    # basis as Karaikal's
         "band": "S",               # UNVERIFIED — same basis as Karaikal's
     },
+
+    # --- Fourth radar: IMD's own Chennai DWR (S-band), caz_cni.gif -- came
+    # back online 2026-09-30 after being off-air; same "Max with panels"
+    # layout + printed lat/lon axis as Kochi's, so calibrated the same
+    # measured-not-guessed way: vertical gridline columns at the printed
+    # 78/79/80/81/82 degE labels and horizontal gridline rows at the
+    # printed 12/13/14/15 degN labels were found via a brightness-peak scan
+    # over the panel (clear of land/text clutter), giving an affine
+    # pixel<->degree fit on each axis. That fit's degree-per-pixel spacing
+    # converts to 1.0023 km/px (lon axis) and 1.0000 km/px (lat axis) --
+    # both independently matching the frame's own printed "Hor Res: 1.000
+    # km/pixel" almost exactly, a strong cross-check that this fit is
+    # right. The radar's own site marker (a small bright crosshair dot
+    # immediately left of the printed "CHN" label) was then found directly
+    # in pixel space and run back through that same fit to get
+    # site_lat/site_lon below -- same method as Kochi's, not a guessed town
+    # center. Lands about 7km west of central Chennai, inland from the
+    # coast -- plausible for a DWR siting, but still worth a sanity check
+    # against the merged map once a few real cycles have run.
+    "chennai": {
+        "site_lat": 13.0901,
+        "site_lon": 80.2067,
+        "site_elev_m": 6.0,        # UNVERIFIED — Chennai-area average-elevation guess
+        "band": "S",               # per direct report -- S-band, unlike NIOT/Karaikal/Kochi
+    },
 }
 
 PRODUCT_RADAR = {
     "ppi": "niot", "maxz": "niot", "ppz": "niot",
     "kkl_ppi": "karaikal", "kkl_ppz": "karaikal", "kkl_maxz": "karaikal",
     "koc_maxz": "kochi",
+    "cni_maxz": "chennai",
 }
 
 EFFECTIVE_EARTH_RADIUS_KM = 8494.0  # standard 4/3-Earth-radius model
@@ -404,6 +430,100 @@ PRODUCTS = {
         # pixel, extend masks/koc_maxz_static_exclude.png the same way
         # (regenerate the intersection over a fresh batch of frames).
         "static_exclude_mask": "masks/koc_maxz_static_exclude.png",
+    },
+
+    # --- Chennai DWR (see calibration-status comment above RADAR_SITES) ---
+    "cni_maxz": {
+        "url": "https://mausam.imd.gov.in/Radar/caz_cni.gif",
+        "role": "aloft_early_warning",
+        "range_km": 250.0,         # printed directly in the frame's own metadata panel ("Range: 250 km")
+        "elevation_deg": None,     # column-max, not a single tilt -- same as every other MAXZ product here
+        "image_size": (919, 700),
+        # Same "Max with panels" layout as Kochi (cross-section strips top
+        # + right, plan-view confined to bottom-left, full lat/lon
+        # gridlines printed on the panel) -- site_px/km_per_px measured
+        # from THIS frame's own gridlines + site marker, see the
+        # calibration-status comment above RADAR_SITES.
+        "site_px": (240.0, 447.0),
+        "km_per_px": 1.000,        # frame's own metadata prints "Hor Res: 1.000 km/pixel" -- confirmed independently via the gridline fit on both axes
+        "colorbar_bbox": (712, 74, 785, 424),
+        "value_at_top": 60.0,      # same uniform 2.5dB/band MAX(dBZ) scale as every other MAXZ/PPZ product
+        "value_at_bottom": 20.0,
+        "timestamp_bbox": (630, 28, 919, 50),
+        "elevation_bbox": None,    # no elevation line -- column-max product
+        "plot_bbox": (0, 198, 499, 700),
+        "cell_dbz_threshold": 35,  # matches every other MAXZ product here
+        # Deliberately NOT hand-boxing the printed "NN.N km" range-ring
+        # labels or the lat/lon gridlines the way kkl_maxz/koc_maxz do --
+        # unlike Kochi's WHITE gridlines (which land within DIST_THRESHOLD
+        # of this scale's pale near-white 35-42dBZ band, see koc_maxz's own
+        # comment), this frame's gridlines/text render in near-BLACK, and
+        # DIST_THRESHOLD=2 is tight enough that near-black isn't within
+        # range of any of this LUT's saturated red/orange/yellow/blue
+        # swatches (checked directly against this frame's own colorbar
+        # samples). extract_cells' existing out-of-range check (rng_km >
+        # range_km*1.05) is also still live as backstop insurance either
+        # way. If real cycles turn up a text/gridline false "cell" anyway,
+        # build a static_exclude_mask the same way koc_maxz's was (diff a
+        # batch of real archived frames for persistently-colliding pixels)
+        # -- not possible yet from a single still frame.
+        # Three small static collisions found once the open-water texture
+        # fix (exclude_colors, below) uncovered what was left: the
+        # national-emblem logo every frame draws in the same bottom-right
+        # corner (its own colors include reds/blues that land on real LUT
+        # swatches), plus two small station-code text labels whose
+        # anti-aliased strokes happened to do the same. Found by direct
+        # inspection of this one real frame -- unlike the gridlines/km
+        # labels (left unboxed, see below), these ARE fixed-position
+        # static graphics, so a position box is the right tool here.
+        "label_exclude_boxes": [
+            (430, 618, 484, 686),   # national emblem, bottom-right corner
+            (0, 460, 14, 490),      # station-code label text, left edge
+            (78, 288, 88, 298),     # station-code label text, near "RCT"
+        ],
+        # This radar came back online right before this was added, and the
+        # very first live frame showed a lot of scattered single/few-pixel
+        # false echo across open water -- isolated points/dashes rather
+        # than the coherent filled patches real reflectivity forms,
+        # consistent with residual ground/sea clutter or AP the printed
+        # "Clutter Filter: IIRDoppler 7" hasn't fully suppressed yet. These
+        # specks were already too small to ever pass extract_cells' own
+        # MIN_CELL_ABSOLUTE_PIXELS floor for cell DETECTION -- but that
+        # floor does nothing for the raster OVERLAY image, which draws
+        # every surviving pixel directly (see decode_reflectivity's
+        # despeckle_min_px handling). 8px is intentionally a bit above
+        # MIN_CELL_ABSOLUTE_PIXELS' own 5px floor given how dense this
+        # radar's speckle was on first look -- worth tightening or loosening
+        # once a few real cycles are in.
+        "despeckle_min_px": 8,
+        # The REAL driver of "a lot of fake echoes" turned out to be much
+        # bigger than scattered speckle: this radar's open-water basemap
+        # fill is itself dithered across several light-blue shades (a
+        # watercolor-ish texture, not a flat fill), and one of those
+        # shades -- (153,204,255) -- lands close enough to this scale's
+        # real 35.0dBZ swatch to read as moderate rain across almost the
+        # ENTIRE visible sea surface (confirmed directly: a 35+dBZ mask
+        # over a verified-clean open-water patch covered the whole
+        # patch, concentrated overwhelmingly in this one exact RGB
+        # value). Despeckling alone can't fix this -- it's not isolated
+        # points, it's a near-full-coverage texture, indistinguishable
+        # from real echo by component size alone. Measured the 8 distinct
+        # shades actually in use across several verified-clean open-water
+        # patches (collectively >93% of all pixels sampled there) and
+        # exclude exactly those -- not a position-based mask (koc_maxz's
+        # style), since this texture tiles the whole water surface rather
+        # than sitting at fixed coordinates. Deliberately leaving the
+        # darkest two near-matches ((0,0,153)/(0,0,204), which are this
+        # scale's own real 20.0/22.5dBZ swatches) OUT of this list -- at
+        # low sample counts in the clean patches, those read more like
+        # gridline anti-aliasing over water than general texture, and
+        # excluding a product's own real lowest-band colors outright
+        # risks silently zeroing out genuine weak echo there instead.
+        # Worth revisiting with more real frames; this is a first pass.
+        "exclude_colors": [
+            (102, 204, 255), (153, 204, 255), (102, 153, 255), (153, 153, 255),
+            (102, 153, 204), (102, 204, 204), (153, 153, 204), (153, 204, 204),
+        ],
     },
 }
 
@@ -957,6 +1077,32 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
 
     dbz_flat = values[idx]
     dbz_flat[dist > DIST_THRESHOLD] = np.nan
+
+    exclude_colors = cfg.get("exclude_colors")
+    if exclude_colors:
+        # Known-background colors that must NEVER register as echo,
+        # regardless of what the nearest-neighbour LUT match says --
+        # distinct from DIST_THRESHOLD's generic "too far from any swatch
+        # to trust" cutoff, this is for colors that are themselves WITHIN
+        # DIST_THRESHOLD of a real swatch (so the generic cutoff can't
+        # catch them) but are known, by direct inspection of a real clean
+        # frame, to be the basemap's own fill/texture rather than echo.
+        # First needed for cni_maxz: its open-water texture dithers
+        # between several light-blue shades to render a plain, echo-free
+        # sea surface, and one of those shades (153,204,255) sits close
+        # enough to this scale's real 35.0dBZ swatch to get matched as
+        # moderate rain across almost the entire visible ocean (see that
+        # PRODUCTS entry's comment) -- a scale/overlap problem the generic
+        # distance cutoff has no way to distinguish from genuine echo,
+        # since by construction it search for the CLOSEST real swatch.
+        # Encode each flat pixel as one int (like a packed RGB888 value)
+        # for a fast vectorized membership test instead of a per-pixel loop.
+        packed = (flat[:, 0].astype(np.int64) * 65536
+                  + flat[:, 1].astype(np.int64) * 256
+                  + flat[:, 2].astype(np.int64))
+        exclude_packed = np.array([r * 65536 + g * 256 + b for (r, g, b) in exclude_colors])
+        dbz_flat[np.isin(packed, exclude_packed)] = np.nan
+
     dbz = dbz_flat.reshape(h, w)
 
     for (bl, bt, br, bb) in cfg.get("label_exclude_boxes", []):
@@ -987,6 +1133,29 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         yy, xx = np.mgrid[0:h, 0:w]
         dist_km = np.hypot(xx - (site_x - l), yy - (site_y - t)) / km_per_px
         dbz[dist_km < mask_within_km] = np.nan
+
+    despeckle_min_px = cfg.get("despeckle_min_px")
+    if despeckle_min_px is not None:
+        # Isolated-pixel/few-pixel noise -- distinct from extract_cells'
+        # own MIN_CELL_ABSOLUTE_PIXELS floor, which only ever protects the
+        # CELL-DETECTION path (storm markers/arrows/forecasts); this array
+        # is ALSO drawn directly as the raster overlay image via
+        # dbz_array_to_png(), completely independent of extract_cells, so a
+        # product whose clutter rejection leaves a lot of scattered single-
+        # pixel false echo (reported directly for cni_maxz right after that
+        # radar came back online -- see its PRODUCTS entry) still painted
+        # that speckle all over the visible map even though every one of
+        # those specks was already too small to ever become a tracked
+        # cell. Opt-in (unset means exactly today's behavior) and generic,
+        # same pattern as mask_within_km -- a no-op for every product that
+        # doesn't set it.
+        noise_mask = ~np.isnan(dbz)
+        labeled, n = ndimage.label(noise_mask, structure=np.ones((3, 3)))
+        if n > 0:
+            sizes = ndimage.sum(noise_mask, labeled, index=np.arange(1, n + 1))
+            small_labels = np.flatnonzero(sizes < despeckle_min_px) + 1
+            if len(small_labels):
+                dbz[np.isin(labeled, small_labels)] = np.nan
 
     return dbz
 
@@ -1333,6 +1502,7 @@ PRODUCT_STYLE = {
     "kkl_ppz": {"color": "#17becf", "label": "Karaikal Extended Radar"},
     "kkl_maxz": {"color": "#8c564b", "label": "Karaikal MAXZ - aloft / building"},
     "koc_maxz": {"color": "#2ca02c", "label": "Kochi MAXZ - aloft / building"},
+    "cni_maxz": {"color": "#e377c2", "label": "Chennai DWR MAXZ - aloft / building"},
 }
 
 RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR",
@@ -1938,7 +2108,36 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     # in that shared patch so overlapping storms don't render as a muddy
     # double-exposure or show a stale blob the fresher radar has already
     # moved past -- see that function's docstring.
-    rasters_to_draw = _mask_stale_overlap(_last_dbz, products)
+    # Drop any product whose last-seen observation is older than
+    # STALE_OBS_MINUTES from the RENDERED map entirely -- both the raster
+    # and its storm markers/arrows below -- not just the banner's red-text
+    # flag. A flagged-but-still-drawn stale frame still puts a confident-
+    # looking colored blob and cell marker on the map for a storm that may
+    # have already dissipated, or simply isn't there any more by the time
+    # a viewer looks; the banner text is easy to miss next to a vivid map.
+    # This is the same STALE_OBS_MINUTES threshold build_info_banner_html()
+    # already uses for its own red-text flag, so "flagged" and "dropped"
+    # always agree -- a product never shows live-looking data on the map
+    # while its own banner entry calls it stale, or vice versa. A product
+    # that's never been seen at all this run (obs_time None) is treated as
+    # fresh here, not dropped -- that's "no data yet", a materially
+    # different situation from "had data, it's gone stale", and dropping it
+    # here would just silently blank a product that was never polled in
+    # this call to begin with (e.g. one of `products` genuinely absent from
+    # POLLED_PRODUCTS this run).
+    now_utc = datetime.now(timezone.utc)
+    fresh_products = {
+        p for p in products
+        if _last_obs_time_seen.get(p) is None
+        or (now_utc - _last_obs_time_seen[p]).total_seconds() / 60.0 <= STALE_OBS_MINUTES
+    }
+    stale_dropped = [p for p in products if p not in fresh_products]
+    if stale_dropped:
+        print(f"[render] dropping stale product(s) from the map (>{STALE_OBS_MINUTES}min old): "
+              f"{', '.join(stale_dropped)}")
+
+    rasters_to_draw = _mask_stale_overlap(
+        {p: a for p, a in _last_dbz.items() if p in fresh_products}, products)
     for product in products:
         if product not in rasters_to_draw:
             continue
@@ -1951,9 +2150,9 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
 
     do_fuse = fuse and len({PRODUCT_RADAR[p] for p in products}) > 1
     if do_fuse:
-        cells_to_project = cluster_cells([c for p in products for c in _prev_cells.get(p, [])])
+        cells_to_project = cluster_cells([c for p in fresh_products for c in _prev_cells.get(p, [])])
     else:
-        cells_to_project = [c for p in products for c in _prev_cells.get(p, [])]
+        cells_to_project = [c for p in fresh_products for c in _prev_cells.get(p, [])]
 
     n_projected = 0
     for c in cells_to_project:
