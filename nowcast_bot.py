@@ -2758,24 +2758,20 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
 #   failure mode KEEP_FRAMES_PER_PRODUCT's docstring already called out for
 #   a from-scratch animation feature.
 #
-# - The three GIFs themselves are only REBUILT once an hour (see
-#   run_pipeline's minute-gate below) -- assembling/encoding a 48-frame GIF
-#   every 15 minutes for content that (per explicit instruction) only needs
-#   to visibly change once an hour would be pure waste, 4x the CPU time and
-#   FTP traffic for no reader-visible benefit.
+# - The three GIFs are REBUILT every cycle, matching the ~10-minute cadence
+#   the radar data itself updates on -- so the loop's last frame is never
+#   more than one cycle stale. (This used to be gated to once an hour to
+#   save CPU/FTP traffic, back when stale edge caching made more frequent
+#   updates pointless anyway -- now that Cloudflare purging actually works,
+#   there's no reason to hold the loop back from the same freshness as the
+#   live map, and re-encoding a few dozen frames every ~10 minutes is cheap.)
 #
-# - Critically, the built GIFs + HTML page are still copied into output/
-#   (and hence re-uploaded) on EVERY cycle, not just the hourly rebuild
-#   cycle -- see publish_radar_loop()'s docstring for why skipping that on
-#   the other 3-out-of-4 cycles would actively break things: FTP-Deploy-
-#   Action deletes any remote file its state tracks that's missing from
-#   this run's local output/ dir (same mechanism the 500km test repo's own
-#   README/workflow comments already document), and output/ is rebuilt
-#   from an empty checkout every run. So the built files live in a
-#   COMMITTED radar_loop/ dir (survives between runs, like state/archive)
-#   and get copied forward into output/ every cycle regardless of whether
-#   this cycle regenerated their content -- otherwise the page would
-#   flicker in and out of existence for 45 of every 60 minutes.
+# - The built GIFs + HTML page are written straight into the COMMITTED
+#   radar_loop/ dir (survives between runs, like state/archive) and copied
+#   into output/ every cycle for upload -- see publish_radar_loop()'s
+#   docstring for why that copy-forward still matters even though rebuild
+#   now happens every cycle too (first-ever run before radar_loop/ exists,
+#   and any cycle where capture_mosaic_frame() came up short on frames).
 
 MOSAIC_EDGE_MARGIN_KM = 50.0
 
@@ -3119,17 +3115,19 @@ def publish_radar_loop(rebuild: bool) -> None:
     PERSISTED radar_loop/ dir (committed back to the repo, like
     state/archive/mosaic_frames) and copies them into output/ for upload.
 
-    rebuild=False re-copies whatever's already in radar_loop/ from a
-    previous hourly cycle straight into output/ WITHOUT touching their
-    content -- this still has to run every cycle, not just the hourly
-    one: output/ starts empty on every fresh checkout, and FTP-Deploy-
-    Action deletes any remote file its own state tracks that's missing
-    from this run's local-dir. Skipping this copy on the 3-out-of-4
-    non-rebuild cycles would make the page/GIFs vanish from the live site
-    for 45 minutes out of every hour, then reappear -- not what "update
-    once an hour" was asking for. First-ever run (radar_loop/ doesn't
-    exist yet) always rebuilds regardless of the gate, so the page exists
-    from the start instead of waiting up to an hour for the first upload."""
+    run_pipeline() now passes rebuild=True every cycle, so the GIFs stay as
+    fresh as the live map (matching the ~10-minute polling cadence). The
+    rebuild=False path still exists for the rare cycle where
+    capture_mosaic_frame() didn't produce a usable new frame (e.g. a fetch
+    failure with no archived fallback) -- in that case this just re-copies
+    whatever's already in radar_loop/ into output/ unchanged, rather than
+    rebuilding GIFs with no new content to show. That copy has to run every
+    cycle regardless of whether content changed: output/ starts empty on
+    every fresh checkout, and FTP-Deploy-Action deletes any remote file its
+    own state tracks that's missing from this run's local-dir -- skipping
+    it would make the page/GIFs flicker in and out of existence. First-ever
+    run (radar_loop/ doesn't exist yet) always rebuilds regardless of the
+    gate, so the page exists from the start rather than waiting for one."""
     RADAR_LOOP_DIR.mkdir(parents=True, exist_ok=True)
     gif_paths = {h: RADAR_LOOP_DIR / f"radar_loop_{h}h.gif" for h in RADAR_LOOP_WINDOWS_HOURS}
     html_path = RADAR_LOOP_DIR / "radar_loop.html"
@@ -3216,14 +3214,12 @@ def run_pipeline() -> None:
 
     # Past 3h/6h/12h radar loop -- frame captured every cycle (reusing the
     # _last_dbz this cycle already fetched/decoded above, no extra work),
-    # but the GIFs themselves only REBUILT once an hour -- see this
-    # module's docstring above capture_mosaic_frame() for the full
-    # reasoning on both halves of that split. The minute<15 gate assumes
-    # the usual 15-minute cadence (see nowcast.yml); a run that lands a
-    # little early/late than that just rebuilds a cycle off from the top
-    # of the hour, which self-heals next hour either way.
+    # and the GIFs are now REBUILT every cycle too, matching the ~10-minute
+    # cadence the radar data itself updates on -- see this module's
+    # docstring above capture_mosaic_frame() for why this used to be gated
+    # to once an hour and why that's no longer necessary.
     capture_mosaic_frame()
-    publish_radar_loop(rebuild=datetime.now(timezone.utc).minute < 15)
+    publish_radar_loop(rebuild=True)
     print("Updated radar loop (3h/6h/12h)")
 
     # .htaccess (Cache-Control headers -- see that file's own comments)

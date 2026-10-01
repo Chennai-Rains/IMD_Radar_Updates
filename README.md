@@ -23,8 +23,8 @@ cycles).
 1. Installs Tesseract OCR + the Python dependencies
 2. Runs `python nowcast_bot.py` — one polling cycle: fetch both radars,
    decode reflectivity, track storm cells, build `output/storm_forecast_map.html`,
-   capture this cycle's radar-loop frame, and (once an hour) rebuild the
-   3h/6h/12h radar-loop GIFs — see "Past 3h/6h/12h radar loop" below
+   capture this cycle's radar-loop frame, and rebuild the 3h/6h/12h
+   radar-loop GIFs — see "Past 3h/6h/12h radar loop" below
 3. Commits the updated `state/`, `archive/`, `mosaic_frames/` and
    `radar_loop/` folders back to this repo (so the next scheduled run
    picks up where this one left off)
@@ -78,17 +78,16 @@ circles in frame together (roughly Mangaluru/Shivamogga in the NW to
 Kanyakumari/northern Sri Lanka in the south to Chennai/the Bay of Bengal
 in the NE).
 
-- A frame is captured every ordinary 15-minute cycle (reusing that
+- A frame is captured every ordinary ~10-minute cycle (reusing that
   cycle's already-fetched/decoded reflectivity — no extra network calls),
   archived into `mosaic_frames/`, kept for ~13 hours (12h window + an
   hour's slack) and committed back to the repo so there's always a full
   history to animate from.
-- The GIFs themselves are only **rebuilt once an hour** (the first cycle
-  of each hour) — see `nowcast_bot.py`'s "Past 3h/6h/12h radar loop"
-  module docstring for the reasoning. The built files live in a
-  committed `radar_loop/` folder and are re-copied into `output/` on
-  *every* cycle regardless, so the page never flickers in and out of
-  existence on the hours it isn't being regenerated (FTP-Deploy-Action
+- The GIFs are **rebuilt every cycle** too, so the loop's last frame is
+  never more than one polling cycle (~10 minutes) stale — matching the
+  live map's own freshness. The built files live in a committed
+  `radar_loop/` folder and are re-copied into `output/` on every cycle,
+  so the page never flickers in and out of existence (FTP-Deploy-Action
   deletes any remote file missing from a run's local `output/`).
 - `mosaic_basemap.png` (the stitched CARTO Voyager tile background) is
   fetched once ever and committed, so this never hits the tile server
