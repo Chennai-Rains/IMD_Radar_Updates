@@ -119,11 +119,21 @@ jobs:
         continue-on-error: true
 
       - name: Commit updated tracking state + frame archive
+        # mosaic_frames/, radar_loop/ and mosaic_basemap.png added for the
+        # 3h/6h/12h radar loop: mosaic_frames/ needs to persist between
+        # runs for the same reason archive/ already does (something for
+        # the next run to diff/accumulate against -- here, enough frame
+        # history to animate from); radar_loop/ holds the built GIFs/page
+        # between hourly rebuilds so they can be re-copied into output/
+        # every cycle even on the 3-out-of-4 cycles that don't rebuild
+        # them (see publish_radar_loop()'s docstring for why that copy
+        # can't just be skipped); mosaic_basemap.png is fetched once ever
+        # and committed so later runs never re-hit the tile server.
         uses: stefanzweifel/git-auto-commit-action@v5
         continue-on-error: true
         with:
           commit_message: "Update nowcast tracking state"
-          file_pattern: "state/ archive/"
+          file_pattern: "state/ archive/ mosaic_frames/ radar_loop/ mosaic_basemap.png"
           commit_user_name: "nowcast-bot"
           commit_user_email: "actions@users.noreply.github.com"
 

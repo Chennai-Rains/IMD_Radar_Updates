@@ -5,4 +5,12 @@ venv/
 
 # Intermediate raster overlays regenerated fresh every run
 _forecast_overlay_*.png
+_mosaic_overlay_*.png
 storm_forecast_map.html
+
+# radar_loop/ and mosaic_basemap.png ARE committed (see nowcast_bot.py's
+# "Past 3h/6h/12h radar loop" module docstring for why) -- only their
+# copies inside output/ (uploaded fresh via FTP every run) are ignored,
+# path-scoped so this doesn't also match the tracked radar_loop/ files.
+output/*.gif
+output/radar_loop.html

@@ -3,6 +3,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import requests
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from scipy import ndimage
 import cv2
 
@@ -2669,6 +2670,344 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     return dbz
 
 
+# ---------------------------------------------------------------------------
+# Past 3h/6h/12h radar loop (animated GIFs)
+#
+# Produces three looping GIFs -- the fused (NIOT+Karaikal+Kochi) reflectivity
+# picture over the last 3, 6 and 12 hours -- on a fixed geographic extent
+# chosen to keep all three radars' range circles in frame together (same
+# extent as a screenshot of the live storm_forecast_map.html at its
+# zoom_start=7 multi-radar view: Mangaluru/Shivamogga in the NW down to
+# Kanyakumari/northern Sri Lanka in the south, out to Chennai/the Bay of
+# Bengal in the NE). Lives in THIS (production) repo only, built from
+# POLLED_PRODUCTS -- not wired into the 500km test repo.
+#
+# Design, and why it's shaped this way:
+#
+# - A frame is captured every ordinary 15-minute cycle (same cadence as
+#   everything else here), reusing that cycle's ALREADY-fetched/decoded
+#   _last_dbz -- no extra network calls, no re-decoding archived frames
+#   later. This needs a full 12h+ of frame history to animate from, so
+#   mosaic_frames/ is committed back to the repo between runs exactly like
+#   state/ and archive/ already are (see nowcast.yml's git-auto-commit step)
+#   -- without that, every run would again see "no previous frames", same
+#   failure mode KEEP_FRAMES_PER_PRODUCT's docstring already called out for
+#   a from-scratch animation feature.
+#
+# - The three GIFs themselves are only REBUILT once an hour (see
+#   run_pipeline's minute-gate below) -- assembling/encoding a 48-frame GIF
+#   every 15 minutes for content that (per explicit instruction) only needs
+#   to visibly change once an hour would be pure waste, 4x the CPU time and
+#   FTP traffic for no reader-visible benefit.
+#
+# - Critically, the built GIFs + HTML page are still copied into output/
+#   (and hence re-uploaded) on EVERY cycle, not just the hourly rebuild
+#   cycle -- see publish_radar_loop()'s docstring for why skipping that on
+#   the other 3-out-of-4 cycles would actively break things: FTP-Deploy-
+#   Action deletes any remote file its state tracks that's missing from
+#   this run's local output/ dir (same mechanism the 500km test repo's own
+#   README/workflow comments already document), and output/ is rebuilt
+#   from an empty checkout every run. So the built files live in a
+#   COMMITTED radar_loop/ dir (survives between runs, like state/archive)
+#   and get copied forward into output/ every cycle regardless of whether
+#   this cycle regenerated their content -- otherwise the page would
+#   flicker in and out of existence for 45 of every 60 minutes.
+
+MOSAIC_BOUNDS = (6.8, 74.2, 14.6, 82.8)   # (south, west, north, east) degrees
+MOSAIC_ZOOM = 7                           # matches build_forecast_map's zoom_start for 2+ radars
+
+MOSAIC_TILE_URL = CARTO_VOYAGER_URL
+MOSAIC_BASEMAP_PATH = Path("mosaic_basemap.png")
+MOSAIC_FRAMES_DIR = Path("mosaic_frames")
+RADAR_LOOP_DIR = Path("radar_loop")          # persisted (committed) -- see module docstring above
+RADAR_LOOP_WINDOWS_HOURS = (3, 6, 12)
+MOSAIC_RETAIN_HOURS = 13.0                   # 12h window + 1h slack for a late/skipped cycle
+GIF_FRAME_DURATION_MS = 300
+
+
+def _mercator_px(lon: float, lat: float, zoom: int) -> tuple[float, float]:
+    """Standard slippy-map (Web Mercator) global pixel coordinates at a
+    given zoom, tile size 256px -- the same projection CARTO/OSM tiles are
+    served in, used here purely for placing things (overlays, markers,
+    range circles) onto the stitched tile basemap in pixel space."""
+    n = 2 ** zoom
+    x = (lon + 180.0) / 360.0 * n * 256.0
+    lat_rad = math.radians(max(min(lat, 85.05), -85.05))  # mercator's own valid range
+    y = (1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * n * 256.0
+    return x, y
+
+
+def _mosaic_tile_range() -> tuple[int, int, int, int]:
+    """(x_min, y_min, x_max, y_max) tile indices at MOSAIC_ZOOM covering
+    MOSAIC_BOUNDS -- the basemap is stitched from exactly these tiles, so
+    its pixel origin is this tile grid's own top-left corner, not
+    MOSAIC_BOUNDS' corner itself (the bounds just pick which tiles are
+    needed; the actual image is tile-aligned, with a little natural extra
+    margin beyond the requested bounds on each edge)."""
+    south, west, north, east = MOSAIC_BOUNDS
+    x0, y0 = _mercator_px(west, north, MOSAIC_ZOOM)
+    x1, y1 = _mercator_px(east, south, MOSAIC_ZOOM)
+    return (int(x0 // 256), int(y0 // 256), int(x1 // 256), int(y1 // 256))
+
+
+def mosaic_lonlat_to_px(lon: float, lat: float) -> tuple[float, float]:
+    """Pixel coordinates of (lon, lat) within the saved, stitched
+    MOSAIC_BASEMAP_PATH image -- every overlay/marker/circle drawn onto a
+    mosaic frame goes through this one function, so they all agree with
+    the basemap and with each other by construction."""
+    x_min_tile, y_min_tile, _, _ = _mosaic_tile_range()
+    x, y = _mercator_px(lon, lat, MOSAIC_ZOOM)
+    return x - x_min_tile * 256.0, y - y_min_tile * 256.0
+
+
+def fetch_basemap_mosaic() -> Image.Image:
+    """Stitches CARTO Voyager tiles covering MOSAIC_BOUNDS into one PNG and
+    caches it to MOSAIC_BASEMAP_PATH -- fetched ONCE ever (the basemap
+    itself never changes), then committed to the repo like state/archive
+    so every subsequent run just loads it straight off disk with no
+    network call at all. Only hits the tile server again if that cached
+    file is ever missing (first run, or if someone deletes it)."""
+    if MOSAIC_BASEMAP_PATH.exists():
+        return Image.open(MOSAIC_BASEMAP_PATH).convert("RGB")
+
+    x_min, y_min, x_max, y_max = _mosaic_tile_range()
+    n_x, n_y = x_max - x_min + 1, y_max - y_min + 1
+    print(f"[mosaic] fetching {n_x}x{n_y} basemap tiles at zoom {MOSAIC_ZOOM} (one-time, then cached)")
+    canvas = Image.new("RGB", (n_x * 256, n_y * 256), (220, 230, 235))
+    subdomains = "abcd"
+    for i, tx in enumerate(range(x_min, x_max + 1)):
+        for ty in range(y_min, y_max + 1):
+            url = MOSAIC_TILE_URL.format(s=subdomains[(tx + ty) % len(subdomains)],
+                                          z=MOSAIC_ZOOM, x=tx, y=ty)
+            try:
+                resp = requests.get(url, timeout=15)
+                resp.raise_for_status()
+                tile = Image.open(io.BytesIO(resp.content)).convert("RGB")
+            except Exception as exc:
+                print(f"[mosaic] tile ({tx},{ty}) fetch failed ({exc}) -- leaving blank")
+                continue
+            canvas.paste(tile, ((tx - x_min) * 256, (ty - y_min) * 256))
+    canvas.save(MOSAIC_BASEMAP_PATH)
+    return canvas
+
+
+def _mosaic_circle_radius_px(center_lat: float, range_km: float) -> float:
+    """Pixel radius of a `range_km` geographic circle centered at
+    center_lat, in mosaic pixel space. Mercator is locally conformal (it
+    preserves shape/angles at any given point, just not area across the
+    whole map), so a real-world circle really does map to a circle here --
+    this just needs ONE correct radius, measured by projecting a point
+    range_km due north of the center and taking the pixel distance."""
+    cx, cy = mosaic_lonlat_to_px(0.0, center_lat)  # lon irrelevant, only need the y-scale at this latitude
+    dlat = (range_km / 111.32)
+    _, cy2 = mosaic_lonlat_to_px(0.0, center_lat + dlat)
+    return abs(cy - cy2)
+
+
+def render_mosaic_frame(products: tuple, capture_time: datetime) -> Image.Image:
+    """One flat PNG frame for the radar loop: cached CARTO basemap, each
+    fresh product's reflectivity draped on via the same corner-to-corner
+    rectangle placement Leaflet's own ImageOverlay uses in the live map
+    (stretch dbz_array_to_png's output between its plot_bounds_latlon()
+    corners, remapped into mosaic pixel space) -- not a true per-pixel
+    reprojection, but that's exactly what the live map itself already
+    does, so this stays visually consistent with it rather than
+    introducing a second, subtly-different rendering of the same data.
+    Then the same dashed range rings + site markers as the live map, and a
+    timestamp caption so a frame is still readable in isolation (e.g. the
+    first frame of a loop, before playback)."""
+    base = fetch_basemap_mosaic().copy().convert("RGBA")
+
+    radars_shown = sorted({PRODUCT_RADAR[p] for p in products})
+    now_utc = datetime.now(timezone.utc)
+    fresh_products = {
+        p for p in products
+        if _last_obs_time_seen.get(p) is None
+        or (now_utc - _last_obs_time_seen[p]).total_seconds() / 60.0 <= STALE_OBS_MINUTES
+    }
+    rasters = _mask_stale_overlap({p: a for p, a in _last_dbz.items() if p in fresh_products}, products)
+
+    for product, dbz in rasters.items():
+        overlay_path = f"_mosaic_overlay_{product}.png"
+        dbz_array_to_png(dbz, product, overlay_path)
+        overlay = Image.open(overlay_path)
+        south, west, north, east = plot_bounds_latlon(product)
+        x0, y0 = mosaic_lonlat_to_px(west, north)
+        x1, y1 = mosaic_lonlat_to_px(east, south)
+        w, h = max(int(round(x1 - x0)), 1), max(int(round(y1 - y0)), 1)
+        overlay = overlay.resize((w, h), Image.BILINEAR)
+        base.alpha_composite(overlay, dest=(int(round(x0)), int(round(y0))))
+        try:
+            Path(overlay_path).unlink()
+        except OSError:
+            pass
+
+    draw = ImageDraw.Draw(base)
+    drawn_ranges = set()
+    for product in products:
+        range_km = PRODUCTS[product]["range_km"]
+        radar = PRODUCT_RADAR[product]
+        key = (radar, range_km)
+        if key in drawn_ranges:
+            continue
+        drawn_ranges.add(key)
+        site = RADAR_SITES[radar]
+        cx, cy = mosaic_lonlat_to_px(site["site_lon"], site["site_lat"])
+        r = _mosaic_circle_radius_px(site["site_lat"], range_km)
+        # Thin/dashed-looking (drawn as a dotted arc via short segments) --
+        # same "reference context, not data" reasoning as the live map's
+        # own faint range rings.
+        n_dots = max(int(2 * math.pi * r / 10), 12)
+        for i in range(n_dots):
+            if i % 2:
+                continue
+            theta = 2 * math.pi * i / n_dots
+            px, py = cx + r * math.cos(theta), cy + r * math.sin(theta)
+            draw.ellipse([px - 1, py - 1, px + 1, py + 1], fill=(85, 85, 85, 160))
+
+    for radar in radars_shown:
+        site = RADAR_SITES[radar]
+        cx, cy = mosaic_lonlat_to_px(site["site_lon"], site["site_lat"])
+        draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=(30, 60, 150, 255), outline=(255, 255, 255, 255), width=1)
+
+    # Plain hyphen, not an em-dash -- ImageFont.load_default()'s built-in
+    # bitmap font has no glyph for it and silently renders mojibake instead.
+    caption = f"Chennai Rains radar - {capture_time.strftime('%Y-%m-%d %H:%M')} UTC"
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
+    text_bbox = draw.textbbox((0, 0), caption, font=font) if font else (0, 0, len(caption) * 6, 11)
+    pad = 6
+    draw.rectangle([4, base.height - (text_bbox[3] - text_bbox[1]) - pad * 2 - 4,
+                    4 + (text_bbox[2] - text_bbox[0]) + pad * 2, base.height - 4],
+                   fill=(0, 0, 0, 150))
+    draw.text((4 + pad, base.height - (text_bbox[3] - text_bbox[1]) - pad - 4), caption,
+               fill=(255, 255, 255, 255), font=font)
+
+    return base.convert("RGB")
+
+
+def capture_mosaic_frame() -> None:
+    """Called once per ordinary poll cycle (from run_pipeline) -- renders
+    and archives this cycle's mosaic frame, then prunes anything older
+    than MOSAIC_RETAIN_HOURS. Filenamed by wall-clock CAPTURE time (not
+    any product's own obs_time, which can be None if a timestamp failed to
+    parse this cycle) so frames always sort chronologically and the
+    windowing logic below always has something to compare against."""
+    MOSAIC_FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+    now_utc = datetime.now(timezone.utc)
+    frame = render_mosaic_frame(POLLED_PRODUCTS, now_utc)
+    path = MOSAIC_FRAMES_DIR / f"{now_utc.strftime('%Y%m%dT%H%M%SZ')}.png"
+    frame.save(path)
+    print(f"[mosaic] saved {path}")
+
+    cutoff = now_utc - timedelta(hours=MOSAIC_RETAIN_HOURS)
+    for existing in MOSAIC_FRAMES_DIR.glob("*.png"):
+        try:
+            ts = datetime.strptime(existing.stem, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if ts < cutoff:
+            existing.unlink()
+
+
+def _mosaic_frames_since(hours: float) -> list[Path]:
+    now_utc = datetime.now(timezone.utc)
+    cutoff = now_utc - timedelta(hours=hours)
+    frames = []
+    for p in sorted(MOSAIC_FRAMES_DIR.glob("*.png")):
+        try:
+            ts = datetime.strptime(p.stem, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if ts >= cutoff:
+            frames.append(p)
+    return frames
+
+
+RADAR_LOOP_HTML_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chennai Rains — Radar Loop</title>
+<style>
+  body {{ margin: 0; padding: 24px 16px 48px; background: #0b1220; color: #e8edf4;
+         font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }}
+  h1 {{ text-align: center; font-size: 1.3em; margin: 0 0 4px; }}
+  p.sub {{ text-align: center; color: #9fb0c3; margin: 0 0 24px; font-size: 0.9em; }}
+  .loops {{ display: flex; flex-wrap: wrap; justify-content: center; gap: 24px; max-width: 1400px; margin: 0 auto; }}
+  figure {{ margin: 0; background: #121b2e; border-radius: 10px; padding: 10px; flex: 1 1 380px; max-width: 440px; }}
+  figure img {{ width: 100%; height: auto; border-radius: 6px; display: block; }}
+  figcaption {{ text-align: center; margin-top: 8px; font-weight: 600; color: #cdd9e8; }}
+  a {{ color: #7fb2ff; }}
+</style>
+</head>
+<body>
+  <h1>Chennai Rains Radar Loop</h1>
+  <p class="sub">Fused NIOT + Karaikal + Kochi reflectivity · updated hourly · {generated}</p>
+  <div class="loops">
+    {figures}
+  </div>
+  <p class="sub" style="margin-top:28px;">
+    <a href="storm_forecast_map.html">Live storm map →</a> ·
+    <a href="https://chennairains.com">chennairains.com</a>
+  </p>
+</body>
+</html>
+"""
+
+
+def publish_radar_loop(rebuild: bool) -> None:
+    """Writes the three radar-loop GIFs + their HTML page into the
+    PERSISTED radar_loop/ dir (committed back to the repo, like
+    state/archive/mosaic_frames) and copies them into output/ for upload.
+
+    rebuild=False re-copies whatever's already in radar_loop/ from a
+    previous hourly cycle straight into output/ WITHOUT touching their
+    content -- this still has to run every cycle, not just the hourly
+    one: output/ starts empty on every fresh checkout, and FTP-Deploy-
+    Action deletes any remote file its own state tracks that's missing
+    from this run's local-dir. Skipping this copy on the 3-out-of-4
+    non-rebuild cycles would make the page/GIFs vanish from the live site
+    for 45 minutes out of every hour, then reappear -- not what "update
+    once an hour" was asking for. First-ever run (radar_loop/ doesn't
+    exist yet) always rebuilds regardless of the gate, so the page exists
+    from the start instead of waiting up to an hour for the first upload."""
+    RADAR_LOOP_DIR.mkdir(parents=True, exist_ok=True)
+    gif_paths = {h: RADAR_LOOP_DIR / f"radar_loop_{h}h.gif" for h in RADAR_LOOP_WINDOWS_HOURS}
+    html_path = RADAR_LOOP_DIR / "radar_loop.html"
+
+    if rebuild or not html_path.exists() or any(not p.exists() for p in gif_paths.values()):
+        figures = []
+        for hours in RADAR_LOOP_WINDOWS_HOURS:
+            frame_paths = _mosaic_frames_since(hours)
+            out_path = gif_paths[hours]
+            if len(frame_paths) < 2:
+                print(f"[radar-loop] only {len(frame_paths)} frame(s) within {hours}h yet -- "
+                      f"skipping that GIF this run (self-heals once more history has accumulated)")
+                continue
+            frames = [Image.open(p).convert("RGB") for p in frame_paths]
+            frames[0].save(out_path, save_all=True, append_images=frames[1:],
+                            duration=GIF_FRAME_DURATION_MS, loop=0, optimize=True)
+            figures.append(
+                f'<figure><img src="{out_path.name}" alt="Past {hours}h radar loop">'
+                f'<figcaption>Past {hours} Hours</figcaption></figure>'
+            )
+            print(f"[radar-loop] built {out_path} from {len(frames)} frames")
+        if figures:
+            html_path.write_text(RADAR_LOOP_HTML_TEMPLATE.format(
+                generated=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                figures="\n    ".join(figures),
+            ))
+
+    OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
+    for src in [html_path, *gif_paths.values()]:
+        if src.exists():
+            (OUTPUT_HTML.parent / src.name).write_bytes(src.read_bytes())
+
+
 def run_pipeline() -> None:
     """One full cycle: poll NIOT MAXZ + Karaikal MAXZ, update on-disk
     tracking state, build storm_forecast_map.html. Meant to be invoked
@@ -2719,6 +3058,18 @@ def run_pipeline() -> None:
 
     build_forecast_map(products=POLLED_PRODUCTS, fuse=True, out_html=str(OUTPUT_HTML))
     print(f"Wrote {OUTPUT_HTML}")
+
+    # Past 3h/6h/12h radar loop -- frame captured every cycle (reusing the
+    # _last_dbz this cycle already fetched/decoded above, no extra work),
+    # but the GIFs themselves only REBUILT once an hour -- see this
+    # module's docstring above capture_mosaic_frame() for the full
+    # reasoning on both halves of that split. The minute<15 gate assumes
+    # the usual 15-minute cadence (see nowcast.yml); a run that lands a
+    # little early/late than that just rebuilds a cycle off from the top
+    # of the hour, which self-heals next hour either way.
+    capture_mosaic_frame()
+    publish_radar_loop(rebuild=datetime.now(timezone.utc).minute < 15)
+    print("Updated radar loop (3h/6h/12h)")
 
 
 if __name__ == "__main__":
