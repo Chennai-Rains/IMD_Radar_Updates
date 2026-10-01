@@ -183,11 +183,24 @@ jobs:
         # get each one. Never fails the run either way: a missed purge
         # just means Cloudflare serves a cached page for up to its own
         # Cache Rule TTL, which is a minor staleness, not a broken site.
-        if: ${{ !cancelled() && secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ZONE_ID != '' }}
+        # The `secrets.X != ''` check belongs in the shell, not this
+        # step's `if:` -- the workflow_dispatch API's static validator
+        # rejects `secrets.*` references inside a step-level `if:`
+        # expression outright ("Unrecognized named-value: 'secrets'"),
+        # so the no-op has to happen inside `run:` instead, after the
+        # secrets are passed through as plain env vars.
+        if: ${{ !cancelled() }}
         continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
         run: |
-          curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
-            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          if [ -z "$CF_API_TOKEN" ] || [ -z "$CF_ZONE_ID" ]; then
+            echo "CLOUDFLARE_API_TOKEN/CLOUDFLARE_ZONE_ID not set -- skipping purge (see README)"
+            exit 0
+          fi
+          curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
             -H "Content-Type: application/json" \
             --data '{"files": [
               "https://plots.chennairains.com/storm_forecast_map.html",
