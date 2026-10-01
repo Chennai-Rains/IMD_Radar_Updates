@@ -895,9 +895,30 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
         else:
             m = re.search(r"(\d{2}:\d{2}:\d{2})\s*Z?.*?(\d{1,2}\s+\w{3}\s+\d{4})\s*UTC",
                            text, re.DOTALL)
-            if not m:
-                return None
-            date_str, time_str, date_fmt = m.group(2), m.group(1), "%d %b %Y"
+            if m:
+                date_str, time_str, date_fmt = m.group(2), m.group(1), "%d %b %Y"
+            else:
+                # Chennai's layout: a fourth one, "HH:MM / DD-Mon-YYYY" --
+                # no seconds field and no explicit "UTC" suffix anywhere
+                # near it (unlike every other layout here, which all print
+                # UTC explicitly). Assuming UTC anyway for consistency with
+                # every other IMD radar product polled here -- worth a
+                # direct sanity check against the merged map's banner once
+                # real frames are flowing, since this is the one layout
+                # where that assumption isn't confirmed by the frame's own
+                # printed text.
+                m = re.search(r"(\d{1,2}:\d{2})\s*/\s*(\d{1,2}-\w{3}-\d{4})", text)
+                if not m:
+                    return None
+                time_str, date_str, date_fmt, time_fmt = m.group(1), m.group(2), "%d-%b-%Y", "%H:%M"
+                try:
+                    dt = datetime.strptime(f"{date_str} {time_str}", f"{date_fmt} {time_fmt}")
+                except ValueError:
+                    return None
+                dt = dt.replace(tzinfo=timezone.utc)
+                if abs((dt - datetime.now(timezone.utc)).total_seconds()) > 3 * 86400:
+                    return None
+                return dt
 
     try:
         dt = datetime.strptime(f"{date_str} {time_str}", f"{date_fmt} %H:%M:%S")
