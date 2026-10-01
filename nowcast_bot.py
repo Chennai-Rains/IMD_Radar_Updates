@@ -2713,7 +2713,51 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
 #   this cycle regenerated their content -- otherwise the page would
 #   flicker in and out of existence for 45 of every 60 minutes.
 
-MOSAIC_BOUNDS = (6.8, 74.2, 14.6, 82.8)   # (south, west, north, east) degrees
+MOSAIC_EDGE_MARGIN_KM = 50.0
+
+def _compute_mosaic_bounds(margin_km: float = MOSAIC_EDGE_MARGIN_KM) -> tuple[float, float, float, float]:
+    """(south, west, north, east) degrees -- each edge is 50km beyond ONE
+    specific radar's own scan boundary in that direction, per explicit
+    instruction, not just "whichever radar happens to reach furthest
+    there" (NIOT's own east edge is actually very slightly further out
+    than Karaikal's, for instance -- deliberately not used for the east
+    edge anyway):
+      - north: NIOT's own northern range-circle edge (it's the
+        northernmost radar of the three)
+      - west & south: Kochi's own western/southern range-circle edges
+        (the westernmost/southernmost radar)
+      - east: Karaikal's own eastern range-circle edge (not NIOT's,
+        even though NIOT's is marginally further east -- Karaikal is
+        what this crop is anchored to on that side)
+    Longitude degrees-per-km depends on latitude (cos(lat)), so each
+    edge uses ITS OWN radar's latitude for that conversion, not a single
+    shared approximation across the whole map."""
+    def _north_edge(radar, product):
+        site = RADAR_SITES[radar]
+        return site["site_lat"] + (PRODUCTS[product]["range_km"] + margin_km) / 111.32
+
+    def _south_edge(radar, product):
+        site = RADAR_SITES[radar]
+        return site["site_lat"] - (PRODUCTS[product]["range_km"] + margin_km) / 111.32
+
+    def _east_edge(radar, product):
+        site = RADAR_SITES[radar]
+        km_per_deg_lon = 111.32 * math.cos(math.radians(site["site_lat"]))
+        return site["site_lon"] + (PRODUCTS[product]["range_km"] + margin_km) / km_per_deg_lon
+
+    def _west_edge(radar, product):
+        site = RADAR_SITES[radar]
+        km_per_deg_lon = 111.32 * math.cos(math.radians(site["site_lat"]))
+        return site["site_lon"] - (PRODUCTS[product]["range_km"] + margin_km) / km_per_deg_lon
+
+    north = _north_edge("niot", "maxz")
+    west = _west_edge("kochi", "koc_maxz")
+    south = _south_edge("kochi", "koc_maxz")
+    east = _east_edge("karaikal", "kkl_maxz")
+    return (south, west, north, east)
+
+
+MOSAIC_BOUNDS = _compute_mosaic_bounds()  # (south, west, north, east) degrees
 MOSAIC_ZOOM = 7                           # matches build_forecast_map's zoom_start for 2+ radars
 
 MOSAIC_TILE_URL = CARTO_VOYAGER_URL
@@ -2738,35 +2782,54 @@ def _mercator_px(lon: float, lat: float, zoom: int) -> tuple[float, float]:
 
 
 def _mosaic_tile_range() -> tuple[int, int, int, int]:
-    """(x_min, y_min, x_max, y_max) tile indices at MOSAIC_ZOOM covering
-    MOSAIC_BOUNDS -- the basemap is stitched from exactly these tiles, so
-    its pixel origin is this tile grid's own top-left corner, not
-    MOSAIC_BOUNDS' corner itself (the bounds just pick which tiles are
-    needed; the actual image is tile-aligned, with a little natural extra
-    margin beyond the requested bounds on each edge)."""
+    """(x_min, y_min, x_max, y_max) tile indices at MOSAIC_ZOOM needed to
+    COVER MOSAIC_BOUNDS -- just picks which tiles to fetch/stitch; the
+    saved basemap is then cropped down to the exact bounds (see
+    fetch_basemap_mosaic), not left at this tile grid's own coarser
+    edges. At zoom 7 a tile is ~2.8 degrees (~300km) across, so without
+    that crop the "50km past each radar's edge" margin could silently
+    balloon to several hundred km on whichever side happens to fall
+    closest to a tile boundary -- exactly what was asked NOT to happen."""
     south, west, north, east = MOSAIC_BOUNDS
     x0, y0 = _mercator_px(west, north, MOSAIC_ZOOM)
     x1, y1 = _mercator_px(east, south, MOSAIC_ZOOM)
     return (int(x0 // 256), int(y0 // 256), int(x1 // 256), int(y1 // 256))
 
 
+def _mosaic_origin_px() -> tuple[float, float]:
+    """Exact (not tile-floored) pixel coordinates of MOSAIC_BOUNDS' own
+    (west, north) corner at MOSAIC_ZOOM -- the true origin of the saved,
+    CROPPED basemap image. mosaic_lonlat_to_px measures every point
+    against this, not the coarser tile grid's corner, so what's on disk
+    really does start exactly at the requested bounds."""
+    _, west, north, _ = MOSAIC_BOUNDS
+    return _mercator_px(west, north, MOSAIC_ZOOM)
+
+
 def mosaic_lonlat_to_px(lon: float, lat: float) -> tuple[float, float]:
-    """Pixel coordinates of (lon, lat) within the saved, stitched
+    """Pixel coordinates of (lon, lat) within the saved, cropped
     MOSAIC_BASEMAP_PATH image -- every overlay/marker/circle drawn onto a
     mosaic frame goes through this one function, so they all agree with
     the basemap and with each other by construction."""
-    x_min_tile, y_min_tile, _, _ = _mosaic_tile_range()
+    ox, oy = _mosaic_origin_px()
     x, y = _mercator_px(lon, lat, MOSAIC_ZOOM)
-    return x - x_min_tile * 256.0, y - y_min_tile * 256.0
+    return x - ox, y - oy
 
 
 def fetch_basemap_mosaic() -> Image.Image:
-    """Stitches CARTO Voyager tiles covering MOSAIC_BOUNDS into one PNG and
-    caches it to MOSAIC_BASEMAP_PATH -- fetched ONCE ever (the basemap
-    itself never changes), then committed to the repo like state/archive
-    so every subsequent run just loads it straight off disk with no
-    network call at all. Only hits the tile server again if that cached
-    file is ever missing (first run, or if someone deletes it)."""
+    """Stitches CARTO Voyager tiles covering MOSAIC_BOUNDS, then crops
+    the result down to MOSAIC_BOUNDS' own exact pixel rectangle (tiles
+    only decide what gets fetched -- at zoom 7 a tile is ~300km across,
+    so leaving the image at the tile grid's own coarser edges instead of
+    cropping it would silently turn "50km past each radar's edge" into
+    however much slack that radar's edge happened to leave before the
+    next tile boundary, which could be hundreds of km on some sides and
+    far less on others). Cached to MOSAIC_BASEMAP_PATH, fetched ONCE ever
+    (the basemap itself never changes) and committed to the repo like
+    state/archive, so every subsequent run just loads it straight off
+    disk with no network call at all. Only hits the tile server again if
+    that cached file is ever missing (first run, bounds changed and the
+    stale file was removed, or someone deletes it)."""
     if MOSAIC_BASEMAP_PATH.exists():
         return Image.open(MOSAIC_BASEMAP_PATH).convert("RGB")
 
@@ -2775,7 +2838,7 @@ def fetch_basemap_mosaic() -> Image.Image:
     print(f"[mosaic] fetching {n_x}x{n_y} basemap tiles at zoom {MOSAIC_ZOOM} (one-time, then cached)")
     canvas = Image.new("RGB", (n_x * 256, n_y * 256), (220, 230, 235))
     subdomains = "abcd"
-    for i, tx in enumerate(range(x_min, x_max + 1)):
+    for tx in range(x_min, x_max + 1):
         for ty in range(y_min, y_max + 1):
             url = MOSAIC_TILE_URL.format(s=subdomains[(tx + ty) % len(subdomains)],
                                           z=MOSAIC_ZOOM, x=tx, y=ty)
@@ -2787,8 +2850,17 @@ def fetch_basemap_mosaic() -> Image.Image:
                 print(f"[mosaic] tile ({tx},{ty}) fetch failed ({exc}) -- leaving blank")
                 continue
             canvas.paste(tile, ((tx - x_min) * 256, (ty - y_min) * 256))
-    canvas.save(MOSAIC_BASEMAP_PATH)
-    return canvas
+
+    # Crop the tile-aligned canvas down to MOSAIC_BOUNDS' own exact pixel
+    # rectangle -- see this function's docstring for why that crop matters.
+    ox, oy = _mosaic_origin_px()
+    south, west, north, east = MOSAIC_BOUNDS
+    ex, ey = _mercator_px(east, south, MOSAIC_ZOOM)
+    left, top = int(round(ox - x_min * 256.0)), int(round(oy - y_min * 256.0))
+    right, bottom = int(round(ex - x_min * 256.0)), int(round(ey - y_min * 256.0))
+    cropped = canvas.crop((left, top, right, bottom))
+    cropped.save(MOSAIC_BASEMAP_PATH)
+    return cropped
 
 
 def _mosaic_circle_radius_px(center_lat: float, range_km: float) -> float:
