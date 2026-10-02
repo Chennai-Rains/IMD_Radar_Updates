@@ -2491,7 +2491,17 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 
 # Only archive frames for the products this pipeline actually polls, so the
 # repo doesn't accumulate PPI/PPZ frames for products we never fetch here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz", "koc_maxz")
+#
+# koc_maxz (Kochi MAXZ) dropped per explicit instruction -- that radar is
+# under maintenance, so polling it would just serve an increasingly stale
+# (or outright broken) frame under a "live" banner. cni_maxz (Chennai DWR
+# MAXZ) and kkl_ppz (Karaikal Extended -- the 250-500km ring kkl_maxz's own
+# image can't reach, via its mask_within_km=250.0 field) promoted here from
+# the 500km test repo per explicit instruction, after testing there; both
+# were already fully defined in this file (PRODUCTS/PRODUCT_STYLE/
+# PRODUCT_RADAR/ARROW_MAX_RANGE_KM all already had entries for them) so
+# this line is the only change needed to turn them on for real here.
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
