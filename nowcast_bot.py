@@ -2135,6 +2135,106 @@ def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES,
 }})();"""
 
 
+def build_cell_zoom_declutter_script(map_var: str, registry: list[tuple[str, float, str]]) -> str:
+    """Thins out cell markers AND their direction arrows by ZOOM LEVEL the
+    same way OSM/Google Maps declutters place labels -- fewer, only the
+    most significant ones visible zoomed out over a wide area,
+    progressively more revealed as you zoom into a smaller area --
+    requested directly after a wide-area view (multiple radars, many
+    small cells) read as too busy/cluttered, then again to extend the
+    same treatment to the arrows. "Significant" here is the cell's own
+    real detected area in km^2 (the same area_km2 already driving its
+    marker radius -- see that comment a few lines up), a reasonable
+    stand-in for "how much this matters to a reader scanning the whole
+    map" the same way a city's population decides whether it's labeled at
+    a given map zoom. An arrow entry carries its OWN cell's area_km2, not
+    a separately-computed score, specifically so it declutters in lock
+    step with its own circle -- never one visible without the other,
+    which would just read as a rendering bug.
+
+    Deliberately a flat lookup table of (max zoom, min area_km2 to show)
+    tiers rather than a continuous formula -- easier to reason about and
+    retune by eye than a smooth curve, and label-declutter systems
+    elsewhere (OSM included) are themselves tiered, not continuous, for
+    the same reason. Tuned against this map's own default zoom levels
+    (build_forecast_map uses 7 for a multi-radar view, 9 for single-radar)
+    and will likely want retuning once this has been watched through a
+    real widespread-storm day where there are enough cells for decluttering
+    to matter at all -- at low cell counts every tier shows everything
+    anyway. Every tier's threshold is inclusive of the zoom below it (the
+    last matching row wins), so zoom 12 and up always shows every cell
+    regardless of size.
+
+    Hides rather than removes a layer outside its tier -- cheaper than
+    re-adding/removing layers on every zoom change, and a hidden layer's
+    popup/tooltip still technically works if a reader somehow clicks
+    through an invisible one, a fine trade for how rarely that'll happen.
+    A circle (Leaflet Path) and a direction-arrow Marker don't share a
+    visibility API, so each entry's "kind" picks the right one: a
+    circle's opacity/fillOpacity via setStyle, a marker's single opacity
+    via setOpacity (markers have no separate fill).
+
+    Returns BARE JavaScript (no <script> tags) for the same reason
+    build_autorefresh_script's docstring explains -- added the same way,
+    via m.get_root().script.add_child(...).
+
+    CRITICAL ORDERING NOTE, learned the hard way (reported directly as a
+    completely blank map, banner/legend still visible -- the exact
+    "everything after this line in the shared script block silently
+    stops running" symptom build_autorefresh_script's own docstring warns
+    about, caused a different way this time): m.get_root().script.add_child
+    appends to the ROOT figure's script list, which branca renders BEFORE
+    the map/circle/marker elements' own auto-generated init code later in
+    that same shared <script> block -- so at the moment this function's
+    code would normally run, `{{map_var}}` and every `circle_*`/`marker_*`
+    variable it references don't exist yet. Referencing an undefined var
+    throws, and since it's all one synchronous <script> tag, that
+    exception kills every statement after it -- including Leaflet's own
+    map/tile-layer init -- leaving a blank page with only the plain-HTML
+    overlays (which don't depend on any JS running) still showing.
+    Wrapping the whole body in setTimeout(fn, 0) defers it to the next
+    event-loop tick, by which point the REST of this same script block
+    (map/circle/marker declarations included) has already finished
+    executing synchronously -- cheap and sufficient, no need for a
+    DOMContentLoaded/load listener since nothing here waits on external
+    resources, just on later lines of the same script having run."""
+    if not registry:
+        return ""
+    entries = ",".join(f'{{m:{name},a:{area:.3f},k:"{kind}"}}' for name, area, kind in registry)
+    # (max_zoom_for_this_tier, min_area_km2_to_show) -- first row whose
+    # max_zoom is >= the current zoom wins; last matching row wins ties,
+    # see tiers.length-1 fallback below for "zoom higher than every listed
+    # tier -> show everything".
+    tiers = [(6, 60.0), (7, 25.0), (8, 12.0), (9, 6.0), (10, 2.0), (11, 0.5)]
+    tiers_js = ",".join(f"[{z},{a}]" for z, a in tiers)
+    return f"""
+setTimeout(function() {{
+    var map = {map_var};
+    var cells = [{entries}];
+    var tiers = [{tiers_js}];
+    function minAreaForZoom(z) {{
+        for (var i = 0; i < tiers.length; i++) {{
+            if (z <= tiers[i][0]) return tiers[i][1];
+        }}
+        return 0;  // past the last tier -- show every cell, however small
+    }}
+    function updateCellVisibility() {{
+        var minArea = minAreaForZoom(map.getZoom());
+        cells.forEach(function(c) {{
+            var show = c.a >= minArea;
+            if (c.k === 'marker') {{
+                c.m.setOpacity(show ? 1 : 0);
+            }} else {{
+                c.m.setStyle({{opacity: show ? 0.6 : 0, fillOpacity: show ? 0.3 : 0}});
+            }}
+        }});
+    }}
+    map.on('zoomend', updateCellVisibility);
+    updateCellVisibility();
+}}, 0);
+"""
+
+
 def build_fallback_logo_html() -> str:
     """Standalone logo box for the (rare) case there's no reflectivity data
     yet to show the info banner at all -- keeps the branding present on
@@ -2381,17 +2481,58 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     else:
         cells_to_project = [c for p in fresh_products for c in _prev_cells.get(p, [])]
 
+    # Registry feeding build_cell_zoom_declutter_script() below -- each
+    # entry is (this layer's Leaflet JS variable name, its parent cell's
+    # real area in km^2, "circle" or "marker"), collected as markers are
+    # created so the post-loop script can reference every one of them by
+    # name. A cell's direction arrow shares its own entry's area_km2 (not
+    # a separate importance score) specifically so it declutters in lock
+    # step with its own circle -- an arrow with no circle next to it (or
+    # vice versa) would just read as a rendering bug, not a feature.
+    cell_marker_registry: list[tuple[str, float, str]] = []
+
     n_projected = 0
     for c in cells_to_project:
-        radius = 7 + min(c.pixel_count / 40, 8)
+        # Fixed SCREEN-pixel radius, not a real-world (meter) one -- tried
+        # meter-based (folium.Circle, zoom-scaling) in the test repo first
+        # to stop a cell marker from visibly outgrowing its own shrinking
+        # storm raster as you zoomed out, but that traded one problem for
+        # another: a marker shrinking in lockstep with the raster invites
+        # comparing the two at every zoom level, and a floored, approximate
+        # equal-area circle never matches the raster's actual (often
+        # irregular) footprint closely enough to survive that comparison.
+        # Settled instead on treating it like a basemap PLACE LABEL -- the
+        # text for a city name stays the same pixel size at every zoom
+        # level (what changes with zoom is which labels are dense enough to
+        # show at all, which build_cell_zoom_declutter_script below
+        # handles), it never grows or shrinks to match the city's real
+        # footprint. So CircleMarker (pixels, zoom-fixed), sized by
+        # area_km2 only to give bigger/stronger cells a modestly bigger
+        # fixed dot than small ones (the way a capital gets bigger label
+        # text than a village) -- never by zoom level. Tested in the
+        # 500km test repo through a real widespread-storm day before being
+        # carried over here, per explicit instruction.
+        km_per_px = PRODUCTS[c.product]["km_per_px"]
+        area_km2 = c.pixel_count / (km_per_px ** 2)
+        radius_px = min(6.0 + area_km2 ** 0.5 * 0.4, 14.0)
         fill_color = "#2ca02c" if do_fuse else PRODUCT_STYLE.get(c.product, {}).get("color", "#08306b")
         label_prefix = "Fused cell" if do_fuse else f"{c.product.upper()} cell"
-        folium.CircleMarker(
-            location=c.centroid_latlon, radius=radius,
-            color="white", weight=3, opacity=1.0,
-            fill=True, fill_color=fill_color, fill_opacity=1.0,
+        circle = folium.CircleMarker(
+            location=c.centroid_latlon, radius=radius_px,
+            # Semi-transparent on purpose -- these markers sit directly on
+            # top of the reflectivity raster (the actual storm shape drawn
+            # a few lines up via ImageOverlay), and at full opacity a cell
+            # marker fully occults whatever real echo pattern is under it,
+            # which is most of what a viewer actually wants to see. Also
+            # tuned and confirmed in the test repo first (dropped from
+            # opaque 1.0/1.0 to 0.85/0.55, then further to 0.6/0.3, which
+            # is what's carried over here).
+            color="white", weight=3, opacity=0.6,
+            fill=True, fill_color=fill_color, fill_opacity=0.3,
             popup=f"{label_prefix} #{c.id} — {c.max_dbz:.0f} dBZ now, trend: {c.trend}",
-        ).add_to(m)
+        )
+        circle.add_to(m)
+        cell_marker_registry.append((circle.get_name(), area_km2, "circle"))
 
         if not c.velocity_kmh or c.velocity_kmh[0] < min_speed_kmh:
             continue  # no reliable motion yet, or effectively stationary
@@ -2425,12 +2566,14 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
         nearest_lead = min(lead_times_min)
         arrow_lat, arrow_lon = project_forward(*c.centroid_latlon, speed_kmh,
                                                 bearing_deg, nearest_lead * 0.55)
-        folium.Marker(
+        arrow = folium.Marker(
             location=(arrow_lat, arrow_lon),
             icon=build_bearing_arrow_icon(bearing_deg, "#333333"),
             tooltip=f"{label_prefix} #{c.id} heading {bearing_deg:.0f}° "
                     f"at {speed_kmh:.0f} km/h",
-        ).add_to(m)
+        )
+        arrow.add_to(m)
+        cell_marker_registry.append((arrow.get_name(), area_km2, "marker"))
         n_projected += 1
 
     if n_projected == 0:
@@ -2448,6 +2591,8 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     m.get_root().html.add_child(folium.Element(build_watermark_html()))
     m.get_root().html.add_child(folium.Element(build_home_button_html()))
     m.get_root().script.add_child(folium.Element(build_autorefresh_script()))
+    m.get_root().script.add_child(folium.Element(
+        build_cell_zoom_declutter_script(m.get_name(), cell_marker_registry)))
 
     if out_html:
         m.save(out_html)
