@@ -926,19 +926,44 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     for whatever other product hits a similar single-digit miss."""
     if PRODUCT_RADAR.get(product) == "karaikal":
         hms = extract_kkl_time_via_templates(img)
-        if hms is not None:
-            h, m, s = hms
-            now_utc = datetime.now(timezone.utc)
-            dt = now_utc.replace(hour=h, minute=m, second=s, microsecond=0)
-            # Day-rollover guard: the frame's printed time can be on the
-            # other side of UTC midnight from "now" if this poll landed
-            # just after midnight for a frame stamped just before it (or
-            # vice versa) -- pick whichever of {yesterday, today,
-            # tomorrow}'s calendar date puts the frame time closest to now,
-            # capped well under 24h so this never drifts onto the wrong day.
-            candidates = [dt + timedelta(days=d) for d in (-1, 0, 1)]
-            dt = min(candidates, key=lambda c: abs((c - now_utc).total_seconds()))
-            return dt
+        if hms is None:
+            # REPORTED AGAIN, this time for kkl_ppz specifically (production,
+            # right after it was promoted): its banner showed the Extended
+            # Radar as stale/24h-old while the live IMD frame was clearly
+            # current. Traced to exactly the failure mode this whole
+            # template-matching path was built to avoid (see this
+            # function's main docstring, "10 days stale" incident): when
+            # extract_kkl_time_via_templates can't confidently read a
+            # frame, falling through to the generic OCR path below means
+            # reading this same unreliable bold font's DATE line via plain
+            # OCR, and that path's sanity check only rejects a result more
+            # than 3 DAYS from "now" -- far too loose to catch a single
+            # misread digit costing exactly one day (e.g. "03"->"02"),
+            # which is what happened here: the time-of-day kept reading
+            # correctly every cycle (proving frames WERE arriving and
+            # updating), but the date stuck one day behind for hours,
+            # making a perfectly live frame look stale on the map. Template
+            # matching apparently fails on kkl_ppz's frames often enough
+            # for this to matter in practice, not just in theory. Fix:
+            # never fall through to that generic date-line OCR for ANY
+            # Karaikal product -- return None here instead (same as any
+            # other extraction miss), which shows as an honest "time
+            # unavailable" in the banner and is treated as "no data yet"
+            # rather than stale, instead of a confident, silently wrong
+            # date that reads as real staleness.
+            return None
+        h, m, s = hms
+        now_utc = datetime.now(timezone.utc)
+        dt = now_utc.replace(hour=h, minute=m, second=s, microsecond=0)
+        # Day-rollover guard: the frame's printed time can be on the
+        # other side of UTC midnight from "now" if this poll landed
+        # just after midnight for a frame stamped just before it (or
+        # vice versa) -- pick whichever of {yesterday, today,
+        # tomorrow}'s calendar date puts the frame time closest to now,
+        # capped well under 24h so this never drifts onto the wrong day.
+        candidates = [dt + timedelta(days=d) for d in (-1, 0, 1)]
+        dt = min(candidates, key=lambda c: abs((c - now_utc).total_seconds()))
+        return dt
 
     if pytesseract is None:
         return None
