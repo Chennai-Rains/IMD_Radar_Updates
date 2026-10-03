@@ -2,43 +2,43 @@
   "maxz": [],
   "kkl_maxz": [
     {
-      "id": 1,
-      "product": "kkl_maxz",
-      "centroid_latlon": [
-        9.2613596269019,
-        79.752512975606
-      ],
-      "max_dbz": 41.9,
-      "pixel_count": 15,
-      "px": 249.8,
-      "py": 453.8,
-      "range_km": 185.3,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        11.4,
-        243.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
       "id": 2,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        8.858449753239936,
-        79.99100512670745
+        9.260710625196323,
+        79.7311412195075
       ],
-      "max_dbz": 38.2,
-      "pixel_count": 72,
-      "px": 276.8611111111111,
-      "py": 500.3611111111111,
-      "range_km": 230.4,
+      "max_dbz": 45.8,
+      "pixel_count": 24,
+      "px": 247.375,
+      "py": 453.875,
+      "range_km": 185.5,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        18.6,
-        265.0
+        12.6,
+        304.0
+      ],
+      "trend": "intensifying",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 5,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        8.796674405709137,
+        79.98400361210932
+      ],
+      "max_dbz": 39.4,
+      "pixel_count": 30,
+      "px": 276.06666666666666,
+      "py": 507.5,
+      "range_km": 237.2,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        10.6,
+        281.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
@@ -67,27 +67,5 @@
       "confirmed_at_surface": false
     }
   ],
-  "cni_maxz": [
-    {
-      "id": 3,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        14.202712612612611,
-        79.1943583837628
-      ],
-      "max_dbz": 40.5,
-      "pixel_count": 20,
-      "px": 130.55,
-      "py": 125.5,
-      "range_km": 165.1,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        2.1,
-        140.0
-      ],
-      "trend": "weakening",
-      "confirmed_at_surface": false
-    }
-  ]
+  "cni_maxz": []
 }
