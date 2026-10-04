@@ -1720,15 +1720,14 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
     having moved off -- confusing for a reader trying to judge where a
     storm actually is right now.
 
-    Fix: in any patch of ground covered by more than one radar currently
-    being drawn, where the FRESHER radar actually has real reflectivity
-    data at that exact spot, drop (NaN out -> fully transparent, same
-    convention dbz_array_to_png already uses for "no data") the staler
-    radar's pixel there. Each radar's raster is left completely untouched
-    outside an overlap -- its own unique-coverage area always renders
-    exactly as before -- so this only ever removes a pixel a viewer could
-    otherwise see fresher data for at the same spot, never data unique to
-    that radar.
+    Fix (v1, now superseded for the drop-entirely case -- see v2 below):
+    in any patch of ground covered by more than one radar currently being
+    drawn, where the FRESHER radar actually has real reflectivity data at
+    that exact spot, drop (NaN out -> fully transparent, same convention
+    dbz_array_to_png already uses for "no data") the staler radar's pixel
+    there. Each radar's raster is left completely untouched outside an
+    overlap -- its own unique-coverage area always renders exactly as
+    before.
 
     Checking the fresher radar's ACTUAL per-pixel data (not just whether
     the spot falls within its range CIRCLE) matters: a range circle covers
@@ -1743,6 +1742,36 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
     picking up there would vanish under Kochi's empty circle) -- reported
     directly as storms visible in one radar's own map but missing from the
     combined one, in exactly this kind of overlap zone.
+
+    v2 -- MAX-BLEND instead of drop, reported directly from a real overlap
+    zone (near Madurai, between Kochi/koc_maxz and Karaikal's extended
+    kkl_ppz): dropping the staler pixel outright assumed the fresher
+    radar's OWN separately-rendered raster would visibly cover that same
+    ground instead, but the two products don't share a pixel grid (very
+    different resolution/projection -- kkl_ppz's coarse long-range pixels
+    vs. koc_maxz's finer ones), so "fresher has SOME data nearby" and
+    "fresher's own image is actually opaque at this exact geographic
+    point" are not the same thing. A staler pixel got dropped to fully
+    transparent purely because a fresher radar had even a faint, barely-
+    above-threshold reading somewhere in the same reprojected cell, while
+    that fresher radar's own independently-smoothed image could still be
+    faded/transparent at that precise spot -- net result, a hole where a
+    real, often STRONGER echo had been visible a moment ago. Confirmed
+    directly (in the 500km test repo): a widespread storm straddling the
+    overlap boundary showed a checkerboard of real data and blank squares
+    along exactly that seam. Ported here once that fix had run clean in
+    the test repo for several real days -- this repo had been left on the
+    v1 drop behavior since the cell-marker-styling carryover, which was
+    explicitly noted as out of scope for that change at the time. Now
+    takes the ELEMENTWISE MAX of this pixel's own value and the fresher
+    radar's value at the same reprojected spot instead of discarding this
+    one -- a location keeps whichever radar's reading is stronger rather
+    than ever going fully blank over a disagreement, at the cost of
+    occasionally keeping a slightly-staler but stronger reading instead of
+    showing "freshest, no matter how much weaker". Still only ever touches
+    pixels where THIS product already detected real echo (the
+    np.where(~np.isnan(arr)) scan below) -- doesn't paint in new data at
+    spots this radar saw nothing at all.
 
     Purely a display fix: doesn't touch cell extraction, tracking, or the
     forecast-cone fusion (`fuse=`) logic above, and runs regardless of
@@ -1763,21 +1792,26 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
         lat, lon = pixel_to_latlon(xs + ox, ys + oy, product)
         this_time = _effective_obs_time(product)
 
-        drop = np.zeros(len(xs), dtype=bool)
+        # Tracks the strongest fresher-radar value seen at each of this
+        # product's own pixels (NaN = no fresher radar had data there) --
+        # blended in with np.fmax against this pixel's own value below,
+        # rather than dropped, so an overlap never wipes a pixel to fully
+        # transparent (see v2 comment above).
+        fresher_value = np.full(len(xs), np.nan)
         for other_product in products:
             # Compared against the ORIGINAL, pre-masking rasters
             # (dbz_by_product, not `masked`) so this doesn't depend on
             # what order `products` happens to process in -- with 3
             # radars shown together, an earlier product in this loop may
-            # already have had some of ITS pixels dropped by a third,
-            # even-fresher radar, and that shouldn't change what counts
-            # as "real data" when checking a later product here.
+            # already have had some of ITS pixels already blended with a
+            # third, even-fresher radar, and that shouldn't change what
+            # counts as "real data" when checking a later product here.
             if other_product not in dbz_by_product or other_product == product:
                 continue
             if PRODUCT_RADAR[other_product] == PRODUCT_RADAR[product]:
                 continue  # same radar, e.g. two products off one site -- not an overlap case
             if _effective_obs_time(other_product) <= this_time:
-                continue  # other isn't strictly fresher -- doesn't get to mask this one
+                continue  # other isn't strictly fresher -- doesn't get to blend into this one
 
             other_arr = dbz_by_product[other_product]
             other_ox = PRODUCTS[other_product]["plot_bbox"][0]
@@ -1787,13 +1821,18 @@ def _mask_stale_overlap(dbz_by_product: dict[str, np.ndarray], products: tuple) 
             other_y = np.round(other_py - other_oy).astype(int)
             in_bounds = ((other_x >= 0) & (other_x < other_arr.shape[1]) &
                          (other_y >= 0) & (other_y < other_arr.shape[0]))
-            has_data = np.zeros(len(xs), dtype=bool)
             idx = np.where(in_bounds)[0]
-            has_data[idx] = ~np.isnan(other_arr[other_y[idx], other_x[idx]])
-            drop |= has_data
+            other_vals = other_arr[other_y[idx], other_x[idx]]
+            # fmax (not max) treats NaN as "no opinion" rather than
+            # propagating it -- a pixel this product already blended a
+            # value in for from one fresher radar must survive untouched
+            # when a second fresher radar simply doesn't reach that spot.
+            fresher_value[idx] = np.fmax(fresher_value[idx], other_vals)
 
-        if drop.any():
-            arr[ys[drop], xs[drop]] = np.nan
+        have_fresher = ~np.isnan(fresher_value)
+        if have_fresher.any():
+            arr[ys[have_fresher], xs[have_fresher]] = np.fmax(
+                arr[ys[have_fresher], xs[have_fresher]], fresher_value[have_fresher])
     return masked
 
 
