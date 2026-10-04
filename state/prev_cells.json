@@ -108,38 +108,44 @@
   ],
   "kkl_maxz": [
     {
-      "id": 3,
+      "id": 1,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.841948917396437,
-        79.5883820361085
+        10.124964563122338,
+        79.4528677354621
       ],
-      "max_dbz": 43.1,
-      "pixel_count": 17,
-      "px": 231.1764705882353,
-      "py": 386.70588235294116,
-      "range_km": 123.5,
+      "max_dbz": 41.9,
+      "pixel_count": 5,
+      "px": 215.8,
+      "py": 354.0,
+      "range_km": 98.5,
       "beam_height_km": 0.0,
       "elevated": false,
-      "velocity_kmh": null,
-      "trend": "intensifying",
+      "velocity_kmh": [
+        8.2,
+        354.0
+      ],
+      "trend": "unknown",
       "confirmed_at_surface": false
     },
     {
       "id": 4,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.510576281843267,
-        79.45138342467502
+        9.84869815808188,
+        79.57768727776171
       ],
-      "max_dbz": 43.8,
-      "pixel_count": 19,
-      "px": 215.6315789473684,
-      "py": 425.0,
-      "range_km": 162.9,
+      "max_dbz": 41.6,
+      "pixel_count": 27,
+      "px": 229.96296296296296,
+      "py": 385.9259259259259,
+      "range_km": 123.1,
       "beam_height_km": 0.0,
       "elevated": false,
-      "velocity_kmh": null,
+      "velocity_kmh": [
+        4.8,
+        360.0
+      ],
       "trend": "steady",
       "confirmed_at_surface": false
     },
@@ -147,18 +153,21 @@
       "id": 6,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.420677527070822,
-        79.61620376832485
+        9.47740508355825,
+        79.48106964041682
       ],
-      "max_dbz": 40.9,
-      "pixel_count": 18,
-      "px": 234.33333333333334,
-      "py": 435.3888888888889,
-      "range_km": 169.1,
+      "max_dbz": 39.7,
+      "pixel_count": 12,
+      "px": 219.0,
+      "py": 428.8333333333333,
+      "range_km": 165.7,
       "beam_height_km": 0.0,
       "elevated": false,
-      "velocity_kmh": null,
-      "trend": "steady",
+      "velocity_kmh": [
+        0.5,
+        350.0
+      ],
+      "trend": "weakening",
       "confirmed_at_surface": false
     }
   ],
