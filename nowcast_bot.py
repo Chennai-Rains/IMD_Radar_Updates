@@ -746,13 +746,28 @@ def range_from_site_km(latlon: tuple[float, float], product: str = "maxz") -> fl
 # shipped as assets/kkl_timestamp_templates.npz so it survives archive/
 # pruning) reads it correctly. Falls back to per-character Tesseract (more
 # reliable than whole-string OCR since there's no multi-char context to
-# confuse it) for any glyph the template library hasn't seen (notably: the
-# library was built from a handful of real frames and happens to have no
-# examples of digits 7/8/9 yet), and if that also can't confidently name a
-# glyph, extraction is abandoned for that frame -- same safe fall-back to
-# poll-receipt time as every other failure mode here.
+# confuse it) for any glyph the template library doesn't recognise, and if
+# that also can't confidently name a glyph, extraction is abandoned for
+# that frame -- same safe fall-back to poll-receipt time as every other
+# failure mode here.
+#
+# The library was rebuilt on 2026-10-02 from all 199 timestamped Karaikal
+# frames in this repo's history (kkl_maxz + kkl_ppz, 30 Sep - 2 Oct). The
+# first one (54 glyphs from a handful of frames) had no 7/8/9 at all, and
+# its only "0" -- like several other entries -- carried a stray mark
+# picked up from the text line above (see _kkl_char_groups), so it only
+# matched a 0 in the minutes position: every frame with an hour of 00-09
+# UTC, or any 7/8/9, failed here and depended on whole-string Tesseract
+# reading the DATE line correctly too. Measured over those 199 frames:
+# 65 read by templates before, 199 after. With the stray mark removed the
+# font turns out to be fully deterministic -- 13 distinct bitmaps cover
+# every character ever seen (one each for 1-9, ":" and "Z", two for "0").
 _KKL_TIMESTAMP_TEMPLATES: dict[str, list[np.ndarray]] | None = None
 _KKL_TEMPLATE_SIZE = (40, 60)  # (w, h), matches assets/kkl_timestamp_templates.npz
+# Geometry of the 5x-upscaled time line _kkl_char_groups works on: digit
+# ink always spans rows 25-109, and the widest single character is 85 px.
+_KKL_TOP_STRIP_PX = 20    # ink ending above this row is not part of any character
+_KKL_MAX_CHAR_W_PX = 100  # two characters side by side are 160+ px wide
 
 
 def _load_kkl_timestamp_templates() -> dict[str, list[np.ndarray]]:
@@ -779,7 +794,22 @@ def _kkl_char_groups(bw: np.ndarray, min_area: int = 15,
     render as 2-3 disconnected strokes (e.g. "5", and "0"'s hollow centre
     can fully separate into two ink blobs at this threshold/resolution),
     while genuine gaps between different characters are consistently
-    wider -- validated against every archived calibration frame."""
+    wider -- validated against every archived calibration frame.
+
+    Two exceptions to that last sentence, both found once a few days of
+    real frames had accumulated, and both fixed here:
+
+    - Two small marks from the text line above poke into the top of this
+      crop at fixed x-positions, directly over the two MINUTES digits.
+      Merging purely by x-gap glued each mark onto the digit beneath it,
+      which stretched that glyph's box up to row 0 -- so the same digit
+      looked different in the minutes position than anywhere else, and a
+      template taken from one position didn't match the other. Ink lying
+      wholly inside the top strip is now dropped before merging.
+    - "4" is wide enough that the gap to the next character is exactly
+      merge_gap, so "4Z" (any time ending in 4 seconds) merged into one
+      box and the line came out as 8 characters instead of 9. A merge is
+      now refused if the result would be wider than one character."""
     inv = (bw < 128).astype(np.uint8)
     labeled, n = ndimage.label(inv, structure=np.ones((3, 3)))
     boxes = []
@@ -790,11 +820,14 @@ def _kkl_char_groups(bw: np.ndarray, min_area: int = 15,
         x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
         if x1 < left_margin or x0 > right_margin:
             continue
+        if y1 < _KKL_TOP_STRIP_PX:
+            continue
         boxes.append([x0, x1, y0, y1])
     boxes.sort(key=lambda b: b[0])
     merged: list[list[int]] = []
     for b in boxes:
-        if merged and b[0] - merged[-1][1] <= merge_gap:
+        if (merged and b[0] - merged[-1][1] <= merge_gap
+                and b[1] - merged[-1][0] < _KKL_MAX_CHAR_W_PX):
             merged[-1][1] = max(merged[-1][1], b[1])
             merged[-1][2] = min(merged[-1][2], b[2])
             merged[-1][3] = max(merged[-1][3], b[3])
@@ -987,7 +1020,13 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     if m:
         date_str, time_str, date_fmt = m.group(1), m.group(2), "%d/%m/%Y"
     else:
-        m = re.search(r"(\d{2}:\d{2}:\d{2})\s*UTC\s*/\s*(\d{1,2}\s+\w{3}\s+\d{4})", text)
+        # \D{0,3} before the day: Tesseract occasionally inserts a stray
+        # character there -- "03:17:44 UTC / O02 Oct 2026" on a perfectly
+        # clean NIOT frame (2026-10-02) -- which made the whole timestamp
+        # unreadable even though every real character was read correctly.
+        # A stray that REPLACES a digit instead still fails to parse, or
+        # lands days away and is rejected by the sanity check below.
+        m = re.search(r"(\d{2}:\d{2}:\d{2})\s*UTC\s*/\D{0,3}(\d{1,2}\s+\w{3}\s+\d{4})", text)
         if m:
             date_str, time_str, date_fmt = m.group(2), m.group(1), "%d %b %Y"
         else:
@@ -2441,6 +2480,24 @@ def build_forecast_map(products: tuple = ("maxz",), fuse: bool = False,
     m.get_root().header.add_child(folium.Element(
         "<style>.leaflet-interactive:focus { outline: none; }</style>"
     ))
+    # Reported: Chrome was popping up "Translate this page from
+    # Malagasy?" on load. branca's own Figure template (the thing that
+    # actually emits the <html> tag) hardcodes a bare <html> with no lang
+    # attribute at all, so Chrome's language detector has nothing to go
+    # on and falls back to guessing from the visible text -- station
+    # names, dBZ, IST, short all-caps place labels -- which is exactly
+    # the kind of sparse, abbreviation-heavy text that detector is known
+    # to misread as all sorts of things, Malagasy here. Two independent
+    # fixes, both standard practice for this: an explicit
+    # Content-Language header so a detector that does look has a real
+    # answer, and Google's own documented <meta name="google"
+    # content="notranslate"> tag, which tells Chrome/Google Translate
+    # outright not to offer translation for this page regardless of what
+    # the detector guesses.
+    m.get_root().header.add_child(folium.Element(
+        '<meta http-equiv="Content-Language" content="en">'
+        '<meta name="google" content="notranslate">'
+    ))
 
     for r in radars_shown:
         site = RADAR_SITES[r]
@@ -2914,6 +2971,29 @@ def compute_optical_flow(prev_dbz: np.ndarray, curr_dbz: np.ndarray,
 
     prev_gray = to_gray(prev_dbz)
     curr_gray = to_gray(curr_dbz)
+
+    # Very fine-resolution products (NIOT MAXZ is ~10.6 px per km) move far
+    # more PIXELS between two frames than Farneback's window can follow: a
+    # 30 km/h storm shifts ~80 px in 15 min, and the window (25) is only
+    # reliable to about 15-20 px, so measured speeds came out near zero and
+    # directions were close to random. Measure on a copy shrunk to about
+    # 1 px/km instead (a 30 km/h storm is then ~8 px) and scale the vectors
+    # back to full-resolution pixels. Checked with known synthetic shifts:
+    # 10-45 km/h come out within ~2% in the right direction (unchanged
+    # products, at or below ~2 px/km, take the original path below).
+    px_per_km = PRODUCTS[product]["km_per_px"]     # despite its name: pixels per km
+    shrink = int(px_per_km // 1.0) if px_per_km >= 2.0 else 1
+    if shrink >= 2:
+        h, w = prev_gray.shape
+        small = (max(w // shrink, 1), max(h // shrink, 1))
+        flow_small = cv2.calcOpticalFlowFarneback(
+            cv2.resize(prev_gray, small, interpolation=cv2.INTER_AREA),
+            cv2.resize(curr_gray, small, interpolation=cv2.INTER_AREA), None,
+            pyr_scale=0.5, levels=4, winsize=25, iterations=3,
+            poly_n=5, poly_sigma=1.2, flags=0,
+        )
+        return cv2.resize(flow_small, (w, h), interpolation=cv2.INTER_LINEAR) * float(shrink)
+
     flow = cv2.calcOpticalFlowFarneback(
         prev_gray, curr_gray, None,
         pyr_scale=0.5, levels=3, winsize=25, iterations=3,
@@ -2950,7 +3030,7 @@ def sample_cell_velocity_from_flow(flow: np.ndarray, cell: Cell, dt_minutes: flo
     dx = float(np.median(patch[..., 0]))
     dy = float(np.median(patch[..., 1]))
 
-    km_per_px = PRODUCTS[product]["km_per_px"]
+    km_per_px = PRODUCTS[product]["km_per_px"]   # NB: really PIXELS per km (pixel_to_latlon divides by it too), so km = px / this
     # Same sign convention as pixel_to_latlon: increasing py = moving south,
     # increasing px = moving east.
     km_east = dx / km_per_px
@@ -3514,6 +3594,483 @@ def publish_radar_loop(rebuild: bool) -> None:
             (OUTPUT_HTML.parent / src.name).write_bytes(src.read_bytes())
 
 
+# === BOT DATA EXPORT (not from the notebook) ===
+#
+# A machine-readable copy of what the map shows, for the query bot ("will
+# it rain in Pallikaranai in the next hour?"). The map itself only carries
+# this information as a picture; tracked cells (state/prev_cells.json) only
+# exist for cores at/above cell_dbz_threshold (30-35 dBZ), so lighter rain
+# over a place would otherwise be invisible to anything reading the data.
+#
+# Two files, both written into output/ so the existing FTP step uploads
+# them alongside the map with no workflow change:
+#
+#   OUTPUT_BOT_JSON -- small index: which radars were used and how old
+#       each one is, the grid layout, the fused strong cells (same ones the
+#       map draws), and every connected rain area down to the weakest echo
+#       IMD's own images carry (20 dBZ), each with its motion.
+#   OUTPUT_BOT_GRID -- gzip of raw bytes: reflectivity on a regular lat/lon
+#       grid, one layer as observed plus one per lead time in
+#       BOT_LEAD_TIMES_MIN, moved along the measured motion.
+#
+# Purely additive: nothing here feeds back into detection, tracking, state
+# or the map. run_pipeline() calls it inside a try/except so a problem
+# here can never stop the map from being published.
+import gzip
+
+OUTPUT_BOT_JSON = Path("output/nowcast_bot.json")
+OUTPUT_BOT_GRID = Path("output/nowcast_bot_grid.bin.gz")
+
+BOT_GRID_STEP_DEG = 0.02            # ~2.2 km; fine enough for a locality, small enough to ship every cycle
+# Grid layers every 10 minutes, not just at 30/60/90: a small cell moving at
+# 30 km/h crosses a 5 km circle in about 20 minutes, so with only half-hour
+# snapshots it could pass right over a place between two of them and never
+# show up there (seen in testing: a 3 km cell due over Velachery 8 minutes
+# out read as "dry" at 0, 30, 60 and 90). At 10-minute steps nothing moving
+# under MAX_PLAUSIBLE_CELL_SPEED_KMH can cross that circle unseen. The
+# 0-minute layer is the observed picture moved up to "now" (each radar's
+# frame is 10-45 minutes old by the time this runs).
+BOT_LEAD_TIMES_MIN = (0, 10, 20, 30, 40, 50, 60, 70, 80, 90)
+BOT_CELL_LEAD_TIMES_MIN = (30, 60, 90)   # projected positions listed per cell; same as build_forecast_map
+# A grid node only counts as echo if at least this share of the radar pixels
+# around it have echo. Taking the strongest pixel alone turned every stray
+# pixel into a whole 5 sq km node: three specks about 1 km across came out
+# as a 48 sq km "rain area", and NIOT's 95 m pixels made it worse.
+BOT_MIN_ECHO_FRACTION = 0.25
+# Optical flow between two frames is only trusted when they are a sensible
+# distance apart in time: too close and a one-pixel wobble reads as a fast
+# storm, too far and the pattern has changed too much to match.
+BOT_MOTION_MIN_DT_MIN = 4.0
+BOT_MOTION_MAX_DT_MIN = 45.0
+# How far one storm's measured motion is spread to its surroundings. 40 km
+# was too far: a stationary patch 53 km from a storm moving at 30 km/h was
+# given 13 km/h of the storm's motion. At 20 km it measures 1 km/h.
+BOT_MOTION_SMOOTH_KM = 20.0
+BOT_MOTION_MIN_ECHO_PX = 25         # fewer echo pixels than this is not enough to measure motion from
+BOT_RAIN_AREA_MIN_KM2 = 20.0        # smaller patches are left in the grid but not listed as an area
+BOT_MAX_RAIN_AREAS = 100
+BOT_NO_ECHO = 0
+BOT_NO_COVERAGE = 255
+# Products left out of the bot export altogether (they stay on the map).
+# For a radar whose picture is not yet trusted enough to answer questions
+# from: its echo, coverage, cells and motion are all kept out of the grid,
+# and it is listed in "radars" with status "excluded".
+BOT_EXCLUDED_PRODUCTS: tuple = ()
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _bot_fresh_products(products: tuple, now_utc: datetime) -> list[str]:
+    """Same rule build_forecast_map uses to decide what is drawn: a product
+    with a known observation time older than STALE_OBS_MINUTES is dropped;
+    one whose time could not be read is kept."""
+    return [p for p in products
+            if p in _last_dbz and (
+                _last_obs_time_seen.get(p) is None
+                or (now_utc - _last_obs_time_seen[p]).total_seconds() / 60.0 <= STALE_OBS_MINUTES)]
+
+
+def _bot_grid_axes(products: tuple) -> tuple[np.ndarray, np.ndarray]:
+    """Grid node latitudes (north to south) and longitudes (west to east)
+    covering every polled product's range circle. Built from ALL polled
+    products, not just this cycle's fresh ones, so the layout stays the
+    same from run to run."""
+    south = west = np.inf
+    north = east = -np.inf
+    for p in products:
+        site = site_for(p)
+        r = PRODUCTS[p]["range_km"]
+        dlat = r / 111.0
+        dlon = r / (111.0 * np.cos(np.radians(site["site_lat"])))
+        south, north = min(south, site["site_lat"] - dlat), max(north, site["site_lat"] + dlat)
+        west, east = min(west, site["site_lon"] - dlon), max(east, site["site_lon"] + dlon)
+    step = BOT_GRID_STEP_DEG
+    north, south = np.ceil(north / step) * step, np.floor(south / step) * step
+    west, east = np.floor(west / step) * step, np.ceil(east / step) * step
+    nrows = int(round((north - south) / step)) + 1
+    ncols = int(round((east - west) / step)) + 1
+    return north - np.arange(nrows) * step, west + np.arange(ncols) * step
+
+
+def _bot_pixel_index(product: str, lat2d: np.ndarray, lon2d: np.ndarray, shape: tuple):
+    """For every grid node: which pixel of this product's decoded array it
+    falls on, and whether the product genuinely covers that node (inside
+    the image, inside range_km, and outside any inner disc the product
+    cedes to a sharper one via mask_within_km)."""
+    cfg = PRODUCTS[product]
+    px, py = latlon_to_pixel(lat2d, lon2d, product)
+    x = np.round(px - cfg["plot_bbox"][0]).astype(int)
+    y = np.round(py - cfg["plot_bbox"][1]).astype(int)
+    inside = (x >= 0) & (x < shape[1]) & (y >= 0) & (y < shape[0])
+    site = site_for(product)
+    dist = _haversine_km((site["site_lat"], site["site_lon"]), (lat2d, lon2d))
+    cover = inside & (dist <= cfg["range_km"])
+    if cfg.get("mask_within_km") is not None:
+        cover &= dist >= cfg["mask_within_km"]
+    return x, y, cover
+
+
+def _bot_regrid_dbz(dbz: np.ndarray, product: str, lat2d: np.ndarray, lon2d: np.ndarray):
+    """Product's reflectivity on the common grid: dBZ where there is echo,
+    -1 where the radar looks and sees nothing, NaN where it does not look.
+    Each node looks at the pixels within roughly one grid cell (not just
+    the single nearest pixel), so a small echo on a fine-resolution product
+    such as NIOT is not skipped over by the coarser grid: it takes the
+    strongest of them, provided enough of them have echo at all
+    (BOT_MIN_ECHO_FRACTION) -- otherwise a lone pixel would be blown up
+    into a whole node."""
+    # Window wide enough that every pixel belongs to the window of the node
+    # nearest to it (half a grid cell in pixels, plus the half pixel lost to
+    # rounding the node onto the pixel grid).
+    half_cell_px = BOT_GRID_STEP_DEG * 111.0 * PRODUCTS[product]["km_per_px"] / 2.0
+    k = 2 * int(np.floor(half_cell_px + 0.5)) + 1
+    echo = ~np.isnan(dbz)
+    src = np.where(echo, dbz, -1.0)
+    if k > 1:
+        share = ndimage.uniform_filter(echo.astype(float), size=k)
+        src = np.where(share >= BOT_MIN_ECHO_FRACTION - 1e-9, ndimage.maximum_filter(src, size=k), -1.0)
+    x, y, cover = _bot_pixel_index(product, lat2d, lon2d, dbz.shape)
+    out = np.full(lat2d.shape, np.nan)
+    out[cover] = src[y[cover], x[cover]]
+    return out
+
+
+def _bot_optical_flow(prev_dbz: np.ndarray, curr_dbz: np.ndarray, product: str) -> np.ndarray:
+    """Farneback flow like compute_optical_flow, with two differences that
+    matter for following WEAK rain and for frames that are far apart in
+    time. Kept separate so the tracked cells' own velocities
+    (compute_optical_flow) are not changed.
+
+    Grayscale: there, no-echo and the weakest echo (20 dBZ, the bottom of
+    IMD's scale) both map to black, so the outline of a weak rain area is
+    invisible to the flow and its motion comes out too slow (a 27 dBZ patch
+    moving at 30 km/h measured 24). Here no-echo is black and any echo
+    starts well above it, so a weak patch has an edge to follow.
+
+    Window: winsize=25 loses track once a storm has moved more than about
+    15 px between frames -- with frames 30-40 min apart a 35-40 km/h storm
+    measured 12-18% slow. A wider window (and more pyramid levels) measures
+    the same cases to within 1 km/h."""
+    vmin, vmax = product_value_range(product)
+    span = (vmax - vmin) or 1.0
+
+    def to_gray(dbz: np.ndarray) -> np.ndarray:
+        level = 90.0 + 165.0 * (np.clip(np.nan_to_num(dbz, nan=vmin), vmin, vmax) - vmin) / span
+        return np.where(np.isnan(dbz), 0.0, level).astype(np.uint8)
+
+    return cv2.calcOpticalFlowFarneback(
+        to_gray(prev_dbz), to_gray(curr_dbz), None,
+        pyr_scale=0.5, levels=5, winsize=45, iterations=3,
+        poly_n=5, poly_sigma=1.2, flags=0,
+    )
+
+
+def _bot_product_motion(product: str, curr_dbz: np.ndarray, lat2d: np.ndarray, lon2d: np.ndarray):
+    """Motion of this product's echo (weak echo included) from optical flow
+    between its current frame and the previous archived one. Returns
+    (weight, u_kmh_east, v_kmh_north) on the common grid plus a short
+    status string; weight is 0 where there is nothing to measure.
+
+    Frames are chosen by the time in their file name, never by sort order,
+    and only when the current frame's own time is known -- so a frame with
+    an unreadable timestamp simply contributes no motion instead of a wrong
+    one."""
+    zeros = np.zeros(lat2d.shape)
+    t_curr = _last_obs_time_seen.get(product)
+    if t_curr is None:
+        return zeros, zeros, zeros, "no motion: time of the latest frame could not be read"
+    best = None
+    for f in ARCHIVE_DIR.glob(f"{product}_*.gif"):
+        t = _obs_time_from_archive_filename(f)
+        if t is None or t >= t_curr:
+            continue
+        dt = (t_curr - t).total_seconds() / 60.0
+        if BOT_MOTION_MIN_DT_MIN <= dt <= BOT_MOTION_MAX_DT_MIN and (best is None or t > best[0]):
+            best = (t, f, dt)
+    if best is None:
+        return zeros, zeros, zeros, (f"no motion: no earlier frame {BOT_MOTION_MIN_DT_MIN:.0f}-"
+                                     f"{BOT_MOTION_MAX_DT_MIN:.0f} min before the latest one")
+    _, prev_file, dt = best
+    try:
+        img = Image.open(prev_file)
+        img.load()
+        prev_dbz = decode_reflectivity(img, product, build_lut_from_colorbar(img, product))
+    except Exception as e:
+        return zeros, zeros, zeros, f"no motion: earlier frame could not be decoded ({e})"
+    if prev_dbz.shape != curr_dbz.shape:
+        return zeros, zeros, zeros, "no motion: frame size changed"
+    flow = _bot_optical_flow(prev_dbz, curr_dbz, product)
+
+    km_per_px = PRODUCTS[product]["km_per_px"]
+    # Same sign convention as sample_cell_velocity_from_flow: +x is east, +y is south.
+    u = flow[..., 0] / km_per_px / (dt / 60.0)
+    v = -flow[..., 1] / km_per_px / (dt / 60.0)
+    valid = (~np.isnan(curr_dbz) | ~np.isnan(prev_dbz)) & (np.hypot(u, v) <= MAX_PLAUSIBLE_CELL_SPEED_KMH)
+    if int(valid.sum()) < BOT_MOTION_MIN_ECHO_PX:
+        return zeros, zeros, zeros, "no motion: too little echo to measure"
+
+    # Average (not strongest) motion over roughly one grid cell, ignoring pixels with no echo.
+    k = max(1, int(round(BOT_GRID_STEP_DEG * 111.0 * km_per_px)))
+    w_px = ndimage.uniform_filter(valid.astype(float), size=k)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        u_px = ndimage.uniform_filter(np.where(valid, u, 0.0), size=k) / w_px
+        v_px = ndimage.uniform_filter(np.where(valid, v, 0.0), size=k) / w_px
+    x, y, cover = _bot_pixel_index(product, lat2d, lon2d, curr_dbz.shape)
+    w, ug, vg = zeros.copy(), zeros.copy(), zeros.copy()
+    w[cover] = w_px[y[cover], x[cover]]
+    ug[cover] = np.nan_to_num(u_px[y[cover], x[cover]])
+    vg[cover] = np.nan_to_num(v_px[y[cover], x[cover]])
+    return w, ug, vg, f"ok: {dt:.0f} min between frames"
+
+
+def _bot_speed_bearing(u: float, v: float) -> tuple[float, float]:
+    return round(float(np.hypot(u, v)), 1), round(float(np.degrees(np.arctan2(u, v)) % 360), 0)
+
+
+def export_bot_data(products: tuple | None = None, now_utc: datetime | None = None) -> dict | None:
+    """Write OUTPUT_BOT_JSON + OUTPUT_BOT_GRID for this cycle (see the block
+    comment above). Returns the JSON content, or None if there was nothing
+    to export."""
+    products = products or POLLED_PRODUCTS
+    now_utc = now_utc or datetime.now(timezone.utc)
+    included = tuple(p for p in products if p not in BOT_EXCLUDED_PRODUCTS)
+    fresh = _bot_fresh_products(included, now_utc)
+    lats, lons = _bot_grid_axes(included or products)
+    lat2d, lon2d = np.meshgrid(lats, lons, indexing="ij")
+    step = BOT_GRID_STEP_DEG
+
+    radars, regridded, age_h = [], {}, {}
+    w_sum = np.zeros(lat2d.shape); u_sum = np.zeros(lat2d.shape); v_sum = np.zeros(lat2d.shape)
+    for p in products:
+        obs = _last_obs_time_seen.get(p)
+        age = (now_utc - obs).total_seconds() / 60.0 if obs is not None else None
+        entry = {
+            "product": p, "radar": PRODUCT_RADAR[p],
+            "label": PRODUCT_STYLE.get(p, {}).get("label", p.upper()),
+            "range_km": PRODUCTS[p]["range_km"],
+            "obs_time_utc": obs.isoformat(timespec="seconds") if obs is not None else None,
+            "obs_time_ist": obs.astimezone(_IST).strftime("%d %b %H:%M IST") if obs is not None else None,
+            "age_min": round(age, 0) if age is not None else None,
+        }
+        if p in BOT_EXCLUDED_PRODUCTS:
+            entry.update(status="excluded", used=False, motion="no motion: left out of the bot export")
+        elif p not in _last_dbz:
+            entry.update(status="missing", used=False, motion="no motion: no frame this cycle")
+        elif p not in fresh:
+            entry.update(status="stale", used=False, motion="no motion: frame too old to use")
+        else:
+            entry.update(status="fresh" if obs is not None else "time_unknown", used=True)
+            regridded[p] = _bot_regrid_dbz(_last_dbz[p], p, lat2d, lon2d)
+            # A frame with no readable time is treated as taken just now (same as the map does).
+            age_h[p] = max(age, 0.0) / 60.0 if age is not None else 0.0
+            w, u, v, note = _bot_product_motion(p, _last_dbz[p], lat2d, lon2d)
+            entry["motion"] = note
+            w_sum += w; u_sum += w * u; v_sum += w * v
+        radars.append(entry)
+
+    if not regridded:
+        print("[bot-export] no usable radar this cycle -- writing an index that says so, no grid")
+
+    # ---- one smooth motion field for the whole grid ----
+    # Measured only where there is echo; spread outward (normalized
+    # convolution, so empty ground doesn't drag speeds toward zero) and,
+    # beyond the reach of any measurement, filled with the overall average
+    # -- a storm has to be able to arrive somewhere that is dry right now.
+    motion_ok = bool(w_sum.sum() > 0)
+    if motion_ok:
+        sigma = BOT_MOTION_SMOOTH_KM / (step * 111.0)
+        gw = ndimage.gaussian_filter(w_sum, sigma)
+        mean_u, mean_v = float(u_sum.sum() / w_sum.sum()), float(v_sum.sum() / w_sum.sum())
+        with np.errstate(invalid="ignore", divide="ignore"):
+            U = np.where(gw > 1e-6, ndimage.gaussian_filter(u_sum, sigma) / gw, mean_u)
+            V = np.where(gw > 1e-6, ndimage.gaussian_filter(v_sum, sigma) / gw, mean_v)
+    else:
+        U = V = None
+        mean_u = mean_v = 0.0
+
+    # ---- layers ----
+    def composite(lead_min):
+        """Strongest value over all used radars at each node. lead_min None =
+        exactly as observed. Otherwise each radar's picture is moved forward
+        by (its own age + lead), so every layer refers to the same clock
+        time even though the radars' frames were taken at different times.
+
+        Echo is carried FORWARD: every echo node moves along the motion
+        measured at that node. (The first version looked BACKWARD from each
+        destination using the motion at the destination. Where the motion
+        field changes over a short distance -- a stationary shower next to
+        a moving storm -- ground between the two has an in-between motion,
+        looks back, finds the stationary shower and copies it: a ghost
+        echo drifting off a shower that isn't moving. In testing that put
+        a stationary patch 28 km out of place at 90 minutes.)
+
+        Coverage still looks backward: a node counts as "seen, dry" only if
+        the place its weather is coming from was inside radar coverage;
+        otherwise nothing is known about what will arrive there."""
+        best = np.full(lat2d.shape, np.nan)
+        for p, grid in regridded.items():
+            if lead_min is None:
+                moved = grid
+            else:
+                hours = age_h[p] + lead_min / 60.0
+                src_lat = lat2d - V * hours / 111.0
+                src_lon = lon2d - U * hours / (111.0 * np.cos(np.radians(lat2d)))
+                r = np.round((lats[0] - src_lat) / step).astype(int)
+                c = np.round((src_lon - lons[0]) / step).astype(int)
+                ok = (r >= 0) & (r < grid.shape[0]) & (c >= 0) & (c < grid.shape[1])
+                seen = np.zeros(grid.shape, dtype=bool)
+                seen[ok] = ~np.isnan(grid[r[ok], c[ok]])
+                moved = np.where(seen, -1.0, np.nan)
+
+                er, ec = np.where(np.nan_to_num(grid, nan=-1.0) > 0)
+                if er.size:
+                    dr = np.round(er - V[er, ec] * hours / 111.0 / step).astype(int)   # north is toward row 0
+                    dc = np.round(ec + U[er, ec] * hours / (111.0 * np.cos(np.radians(lat2d[er, ec]))) / step).astype(int)
+                    inb = (dr >= 0) & (dr < grid.shape[0]) & (dc >= 0) & (dc < grid.shape[1])
+                    echo = np.full(grid.shape, -1.0)
+                    np.maximum.at(echo, (dr[inb], dc[inb]), grid[er[inb], ec[inb]])
+                    # nodes that moved by slightly different amounts can leave one-node gaps inside a storm
+                    echo = ndimage.grey_closing(echo, size=3)
+                    arrived = echo > 0
+                    moved[arrived] = echo[arrived]
+            best = np.fmax(best, moved)
+        return best
+
+    def to_bytes(layer):
+        out = np.full(layer.shape, BOT_NO_COVERAGE, dtype=np.uint8)
+        seen = ~np.isnan(layer)
+        out[seen] = BOT_NO_ECHO
+        echo = seen & (layer > 0)
+        out[echo] = np.clip(np.round(layer[echo]), 1, 254).astype(np.uint8)
+        return out
+
+    layers_meta, blobs = [], []
+    observed = composite(None) if regridded else None
+    if observed is not None:
+        layers_meta.append({"name": "observed", "lead_min": 0,
+                            "note": "latest frame from each radar, as drawn on the map"})
+        blobs.append(to_bytes(observed))
+        if motion_ok:
+            for lead in BOT_LEAD_TIMES_MIN:
+                valid = now_utc + timedelta(minutes=lead)
+                layers_meta.append({"name": f"plus_{lead}", "lead_min": lead,
+                                    "valid_utc": valid.isoformat(timespec="seconds"),
+                                    "valid_ist": valid.astimezone(_IST).strftime("%d %b %H:%M IST")})
+                blobs.append(to_bytes(composite(lead)))
+
+    # ---- fused strong cells: the same ones the map draws ----
+    cells_out = []
+    fresh_cells = [c for p in fresh for c in _prev_cells.get(p, [])]
+    multi = len({PRODUCT_RADAR[p] for p in included}) > 1
+    for c in (cluster_cells(fresh_cells) if multi else fresh_cells):
+        radar = PRODUCT_RADAR.get(c.product)
+        site = RADAR_SITES[radar]
+        dist = float(_haversine_km((site["site_lat"], site["site_lon"]), c.centroid_latlon))
+        max_range = ARROW_MAX_RANGE_KM.get(radar)
+        # Same test the map applies before drawing a direction arrow.
+        reliable = bool(c.velocity_kmh and c.velocity_kmh[0] >= 5.0
+                        and (max_range is None or dist <= max_range))
+        item = {
+            "id": c.id, "radar": radar, "product": c.product,
+            "lat": round(float(c.centroid_latlon[0]), 4), "lon": round(float(c.centroid_latlon[1]), 4),
+            "max_dbz": round(float(c.max_dbz), 1),
+            "area_km2": round(c.pixel_count / (PRODUCTS[c.product]["km_per_px"] ** 2), 1),
+            "trend": c.trend, "elevated": bool(c.elevated),
+            "confirmed_at_surface": bool(c.confirmed_at_surface),
+            "speed_kmh": c.velocity_kmh[0] if c.velocity_kmh else None,
+            "bearing_deg": c.velocity_kmh[1] if c.velocity_kmh else None,
+            "motion_reliable": reliable,
+        }
+        if reliable:
+            item["projected"] = {
+                str(lead): [round(float(x), 4) for x in
+                            project_forward(*c.centroid_latlon, c.velocity_kmh[0], c.velocity_kmh[1], lead)]
+                for lead in BOT_CELL_LEAD_TIMES_MIN}
+        cells_out.append(item)
+
+    # ---- every connected rain area, weak ones included ----
+    areas_out = []
+    if observed is not None:
+        echo = np.nan_to_num(observed, nan=-1.0) > 0
+        labeled, n = ndimage.label(echo, structure=np.ones((3, 3)))
+        cell_km2 = (step * 111.0) ** 2 * np.cos(np.radians(lat2d))
+        idx = np.arange(1, n + 1)
+        if n:
+            area = ndimage.sum(cell_km2, labeled, idx)
+            keep = [i for i in np.argsort(-area) if area[i] >= BOT_RAIN_AREA_MIN_KM2][:BOT_MAX_RAIN_AREAS]
+            slices = ndimage.find_objects(labeled)
+            for i in keep:
+                sl = slices[i]
+                m = labeled[sl] == idx[i]
+                vals = observed[sl][m]
+                la, lo = lat2d[sl][m], lon2d[sl][m]
+                item = {
+                    "lat": round(float(np.average(la, weights=vals)), 3),
+                    "lon": round(float(np.average(lo, weights=vals)), 3),
+                    "area_km2": round(float(area[i]), 0),
+                    "max_dbz": round(float(vals.max()), 0),
+                    "mean_dbz": round(float(vals.mean()), 0),
+                    "south": round(float(la.min()), 2), "north": round(float(la.max()), 2),
+                    "west": round(float(lo.min()), 2), "east": round(float(lo.max()), 2),
+                    "has_strong_core": bool(vals.max() >= 35),
+                }
+                if motion_ok:
+                    au, av = float(U[sl][m].mean()), float(V[sl][m].mean())
+                    item["speed_kmh"], item["bearing_deg"] = _bot_speed_bearing(au, av)
+                areas_out.append(item)
+
+    grid_meta = None
+    if blobs:
+        OUTPUT_BOT_GRID.parent.mkdir(parents=True, exist_ok=True)
+        # mtime=0 keeps the file byte-identical when the data is, so the FTP step skips re-uploading it
+        with open(OUTPUT_BOT_GRID, "wb") as fh:
+            with gzip.GzipFile(fileobj=fh, mode="wb", mtime=0) as gz:
+                gz.write(b"".join(b.tobytes() for b in blobs))
+        grid_meta = {
+            "file": OUTPUT_BOT_GRID.name, "compression": "gzip",
+            "lat_north": round(float(lats[0]), 4), "lon_west": round(float(lons[0]), 4),
+            "step_deg": step, "nrows": len(lats), "ncols": len(lons), "layers": layers_meta,
+        }
+    elif OUTPUT_BOT_GRID.exists():
+        OUTPUT_BOT_GRID.unlink()
+
+    mean_speed, mean_bearing = _bot_speed_bearing(mean_u, mean_v)
+    doc = {
+        "schema": 1,
+        "version": now_utc.strftime("%Y%m%dT%H%M%SZ"),
+        "generated_utc": now_utc.isoformat(timespec="seconds"),
+        "generated_ist": now_utc.astimezone(_IST).strftime("%d %b %Y %H:%M IST"),
+        "stale_after_min": STALE_OBS_MINUTES,
+        "radars": radars,
+        "grid": grid_meta,
+        "motion": {
+            "available": motion_ok,
+            "overall_speed_kmh": mean_speed if motion_ok else None,
+            "overall_bearing_deg": mean_bearing if motion_ok else None,
+            "note": ("bearing is the direction storms are moving TOWARD, in degrees clockwise from north"
+                     if motion_ok else
+                     "no radar had two usable frames, so only the observed layer is written this cycle"),
+        },
+        "cells": cells_out,
+        "rain_areas": areas_out,
+        "how_to_read": (
+            "Grid file: gunzip, then one unsigned byte per node, layers stacked in the order listed. "
+            "byte position = layer_index * nrows * ncols + row * ncols + col, with "
+            "row = round((lat_north - lat) / step_deg) and col = round((lon - lon_west) / step_deg). "
+            "0 = radar coverage but no echo, 255 = no usable radar coverage (do not read as dry), "
+            "1-254 = reflectivity in dBZ. IMD's images start at 20 dBZ, so rain lighter than that is not seen. "
+            "Rough guide: 20-29 light, 30-39 moderate, 40-49 heavy, 50+ very heavy. "
+            "plus_NN layers are the observed picture moved along the measured motion with no growth or decay, "
+            "so check a neighbourhood that widens with lead time (about 5 km at 30 min, 10 km at 60, 15 km at 90). "
+            "Do not answer from this file if generated_utc is more than 30 minutes old. "
+            "Fetch the grid file with ?v=<version> to avoid a cached copy."),
+    }
+    OUTPUT_BOT_JSON.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT_BOT_JSON.write_text(json.dumps(doc, indent=1))
+    print(f"[bot-export] wrote {OUTPUT_BOT_JSON} ({len(cells_out)} cells, {len(areas_out)} rain areas, "
+          f"{len(layers_meta)} grid layers, motion {'ok' if motion_ok else 'unavailable'})")
+    return doc
+
+
 def run_pipeline() -> None:
     """One full cycle: poll NIOT MAXZ + Karaikal MAXZ, update on-disk
     tracking state, build storm_forecast_map.html. Meant to be invoked
@@ -3586,6 +4143,14 @@ def run_pipeline() -> None:
     # cadence the radar data itself updates on -- see this module's
     # docstring above capture_mosaic_frame() for why this used to be gated
     # to once an hour and why that's no longer necessary.
+    # Data copy of this cycle for the query bot / social alerts -- see the BOT
+    # DATA EXPORT block above. Written into output/ so the existing FTP step
+    # uploads it. Never allowed to take the map down with it.
+    try:
+        export_bot_data(POLLED_PRODUCTS)
+    except Exception as e:
+        print(f"[bot-export] failed (the map above is unaffected): {e!r}")
+
     capture_mosaic_frame()
     publish_radar_loop(rebuild=True)
     print("Updated radar loop (3h/6h/12h)")
