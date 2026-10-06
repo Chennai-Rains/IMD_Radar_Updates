@@ -436,6 +436,10 @@ PRODUCTS = {
     # --- Chennai DWR (see calibration-status comment above RADAR_SITES) ---
     "cni_maxz": {
         "url": "https://mausam.imd.gov.in/Radar/caz_cni.gif",
+        # Drop colour-bar swatches only 1 row tall: on some frames the bar's
+        # anti-aliasing leaves a stray khaki row that matches terrain shading
+        # (Eastern Ghats) and was decoded as ~40 dBZ (false alert 7 Oct 01:51 IST).
+        "min_swatch_rows": 2,
         "role": "aloft_early_warning",
         "range_km": 250.0,         # printed directly in the frame's own metadata panel ("Range: 250 km")
         "elevation_deg": None,     # column-max, not a single tilt -- same as every other MAXZ product here
@@ -1122,6 +1126,13 @@ def build_lut_from_colorbar(img: Image.Image, product: str) -> list[tuple[tuple[
     for y in range(h):
         rgb = tuple(int(v) for v in bar[y, bar.shape[1] // 2])
         lut.append((rgb, round(float(values[y]), 1)))
+    min_rows = cfg.get("min_swatch_rows")
+    if min_rows:
+        from collections import Counter
+        cnt = Counter(c for c, _ in lut)
+        kept = [(c, v) for c, v in lut if cnt[c] >= min_rows]
+        if kept:
+            lut = kept
     return lut
 
 
