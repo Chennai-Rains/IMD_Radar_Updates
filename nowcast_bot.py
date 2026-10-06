@@ -2778,14 +2778,69 @@ def save_prev_obs_time(prev_obs_time: dict[str, datetime | None]) -> None:
     OBS_TIME_STATE_FILE.write_text(json.dumps(raw, indent=2))
 
 
-def prune_archive(product: str) -> None:
+def _archive_frame_sort_seconds(path: Path) -> float:
+    """Epoch seconds to order an archived frame by when its ORDER WASN'T
+    RECORDED (see archived_frames below): the obs_time in a dated name, or
+    the poll-receipt time in a number-only name. Only a fallback -- those
+    two are different clocks (IMD publishes a frame roughly 20 minutes
+    after its own obs_time), so they can't be trusted to interleave
+    correctly; the recorded order in state is what's authoritative."""
+    t = _obs_time_from_archive_filename(path)
+    if t is not None:
+        return t.timestamp()
+    try:
+        return float(int(path.stem.rsplit("_", 1)[-1]))
+    except ValueError:
+        return 0.0
+
+
+def archived_frames(product: str, state: dict | None = None) -> list[Path]:
+    """This product's archived frames, OLDEST FIRST, in the order they were
+    actually archived -- the last one is the most recently saved frame.
+
+    Replaces a plain `sorted(ARCHIVE_DIR.glob(...))` that used to be
+    repeated at each call site. A frame is named after its obs_time when
+    that could be read ("kkl_maxz_20261001T235222Z.gif") and after the
+    poll time as a bare epoch number when it couldn't
+    ("kkl_maxz_1790911304.gif"), and "1..." sorts BEFORE "2026..." as
+    text. So whenever a radar's timestamp became unreadable, every new
+    frame sorted to the FRONT of the list -- the "oldest" end:
+      - prune_archive deleted each new frame the moment it was saved,
+        keeping the last few dated frames forever instead;
+      - _load_previous_dbz_for_flow and the fetch-failure fallback both
+        took the last dated frame as "the previous frame", however many
+        hours old it had become.
+    Seen live on 2026-10-02: Karaikal MAXZ's time stopped being readable
+    after 23:52Z, new frames kept arriving for 3+ hours, none survived in
+    the archive, and motion was being measured against the 23:52Z frame
+    with a dt of one polling cycle.
+
+    Order comes from state[product]["archive_order"], which poll_and_decode
+    appends to each time it saves a frame -- that's the real acquisition
+    order, independent of how any frame happens to be named. Frames on
+    disk that aren't in that list (everything archived before this
+    existed, or when `state` isn't passed) go first, ordered by
+    _archive_frame_sort_seconds."""
+    on_disk = {f.name: f for f in ARCHIVE_DIR.glob(f"{product}_*.gif")}
+    recorded = ((state or {}).get(product) or {}).get("archive_order") or []
+    known = [on_disk[name] for name in recorded if name in on_disk]
+    known_names = {f.name for f in known}
+    unrecorded = sorted((f for name, f in on_disk.items() if name not in known_names),
+                        key=_archive_frame_sort_seconds)
+    return unrecorded + known
+
+
+def prune_archive(product: str, state: dict | None = None) -> None:
     """Keep only the most recent KEEP_FRAMES_PER_PRODUCT archived frames for
     `product` -- this repo commits every new frame as a binary file, so an
     unbounded archive would make the repo grow forever for no benefit this
-    pipeline currently uses (nothing here builds an animation from it yet)."""
-    frames = sorted(ARCHIVE_DIR.glob(f"{product}_*.gif"))
+    pipeline currently uses (nothing here builds an animation from it yet).
+    "Most recent" by archived_frames' order, not by file name."""
+    frames = archived_frames(product, state)
     for old in frames[:-KEEP_FRAMES_PER_PRODUCT]:
         old.unlink()
+    if state is not None and product in state:
+        state[product]["archive_order"] = [f.name for f in frames[-KEEP_FRAMES_PER_PRODUCT:]]
 
 
 def _obs_time_from_archive_filename(path: Path) -> "datetime | None":
@@ -2803,7 +2858,7 @@ def _obs_time_from_archive_filename(path: Path) -> "datetime | None":
         return None  # epoch-int fallback name -- no reliable obs_time to recover
 
 
-def _load_previous_dbz_for_flow(product: str) -> np.ndarray | None:
+def _load_previous_dbz_for_flow(product: str, state: dict | None = None) -> np.ndarray | None:
     """Load and decode the most recently archived frame for `product`
     (BEFORE this cycle's new frame gets saved into the same archive --
     caller must call this first) so compute_optical_flow has something to
@@ -2811,7 +2866,7 @@ def _load_previous_dbz_for_flow(product: str) -> np.ndarray | None:
     (first-ever run for this product) or if the archived file fails to
     open/decode for any reason -- optical flow is simply skipped for this
     cycle in that case, same as "no prior track" already does elsewhere."""
-    existing = sorted(ARCHIVE_DIR.glob(f"{product}_*.gif"))
+    existing = archived_frames(product, state)
     if not existing:
         return None
     try:
@@ -2975,7 +3030,7 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     # Must happen BEFORE this cycle's new frame is archived below -- this is
     # looking for whatever was already the most recent archived frame going
     # into this cycle, i.e. the "previous" half of the optical-flow pair.
-    prev_dbz_for_flow = _load_previous_dbz_for_flow(product)
+    prev_dbz_for_flow = _load_previous_dbz_for_flow(product, state)
 
     now = time.time()
     pstate["last_new_frame_ts"] = now
@@ -2984,8 +3039,11 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     tag = obs_time.strftime("%Y%m%dT%H%M%SZ") if obs_time else int(now)
     fname = ARCHIVE_DIR / f"{product}_{tag}.gif"
     fname.write_bytes(raw)
+    # Record the order frames were actually saved in -- see archived_frames
+    # for why the file name alone can't be relied on for that.
+    pstate["archive_order"] = [n for n in pstate.get("archive_order", []) if n != fname.name] + [fname.name]
     print(f"[poll] {product}: new frame saved: {fname} (obs_time={obs_time})")
-    prune_archive(product)
+    prune_archive(product, state)
 
     live_elev = extract_elevation(img, product)
     elevation_deg = live_elev if live_elev is not None else cfg["elevation_deg"]
@@ -3480,7 +3538,22 @@ def run_pipeline() -> None:
             # radar because of one bad network moment. Re-decodes it
             # fresh rather than trusting a cached array from a run that no
             # longer exists.
-            existing = sorted(ARCHIVE_DIR.glob(f"{product}_*.gif"))
+            existing = archived_frames(product, state)
+            # A frame whose obs_time couldn't be read is treated as fresh
+            # everywhere downstream (see build_forecast_map's
+            # fresh_products) -- right for a frame fetched this cycle, but
+            # the newest archived frame can now BE such a frame, and if
+            # fetches keep failing it would stay on the map as "time
+            # unavailable" indefinitely. Its file name still records when
+            # it was polled, so refuse the fallback once that is older
+            # than the same staleness limit everything else uses.
+            if existing and _obs_time_from_archive_filename(existing[-1]) is None:
+                polled_s = _archive_frame_sort_seconds(existing[-1])
+                age_min = (time.time() - polled_s) / 60.0
+                if age_min > STALE_OBS_MINUTES:
+                    print(f"[poll] {product}: fetch failed, and the last archived frame {existing[-1]} "
+                          f"has no readable time and was polled {age_min:.0f} min ago -- not using it")
+                    existing = []
             if existing:
                 print(f"[poll] {product}: fetch failed, falling back to last archived frame {existing[-1]}")
                 img = Image.open(existing[-1])
