@@ -1627,35 +1627,31 @@ import matplotlib.colors as mcolors
 # 46 dBZ cell snaps straight to solid orange instead of a yellow-orange
 # in-between, and the legend's swatches are then literally the same bins
 # the map uses, not samples of a separate gradient.
+# Same palette and 5-dBZ bands as the Telegram/social alert maps
+# (social_alerts.render_image), so the radar page and the alerts read
+# alike and the echoes stand out on the basemap. Bands start at 20 dBZ;
+# anything weaker is not drawn (see dbz_array_to_png).
 DBZ_BAND_COLORS = [
-    "#5ce1e6",  # cyan       -- light/weak echo
-    "#2f80ed",  # blue
-    "#27ae60",  # green
-    "#a0d911",  # yellow-green
-    "#f2c811",  # yellow
-    "#f2994a",  # orange
-    "#eb4034",  # red
-    "#a3123a",  # dark red / crimson -- strongest in-range band
-    "#c724b1",  # magenta -- anything at/above the scale's own top (rare, e.g. hail cores)
+    "#a8e6a1",  # 20-25  light green
+    "#5fcf6a",  # 25-30  green
+    "#f4e04d",  # 30-35  yellow
+    "#f7a936",  # 35-40  orange
+    "#ee6a2e",  # 40-45  deep orange
+    "#d62828",  # 45-50  red
+    "#a4133c",  # 50-55  crimson
+    "#7b2cbf",  # 55+    purple
 ]
+DBZ_BAND_BOUNDARIES = [20, 25, 30, 35, 40, 45, 50, 55, 80]
+DBZ_DRAW_MIN = 20.0
 
 
 def dbz_colormap_and_norm(product: str) -> tuple[mcolors.ListedColormap, mcolors.BoundaryNorm, list]:
-    """The shared banded scale for `product`: n_bands evenly spaced dBZ
-    boundaries across its native (vmin, vmax) range (from its own printed
-    colorbar -- see product_value_range), plus one extra top boundary so
-    the last color is reserved for values at/above vmax rather than being
-    just another mid-range band. Returns (cmap, norm, boundaries) --
-    callers use boundaries to place tick labels/swatches at the same edges
-    the map itself renders."""
-    vmin, vmax = product_value_range(product)
-    n_bands = len(DBZ_BAND_COLORS)
-    # n_bands boundaries spanning vmin..vmax (n_bands-1 "normal" bands),
-    # plus a final boundary above vmax reserved for the top/overflow band.
-    boundaries = list(np.linspace(vmin, vmax, n_bands)) + [vmax + (vmax - vmin) * 0.15]
+    """The shared banded scale (identical for every product): fixed 5 dBZ
+    bands from 20 dBZ up, matching the alert maps. Returns (cmap, norm,
+    boundaries); the legend uses boundaries for its swatch labels."""
     cmap = mcolors.ListedColormap(DBZ_BAND_COLORS)
-    norm = mcolors.BoundaryNorm(boundaries, cmap.N, clip=True)
-    return cmap, norm, boundaries
+    norm = mcolors.BoundaryNorm(DBZ_BAND_BOUNDARIES, cmap.N, clip=True)
+    return cmap, norm, list(DBZ_BAND_BOUNDARIES)
 
 
 PRODUCT_STYLE = {
@@ -1730,6 +1726,7 @@ def dbz_array_to_png(dbz: np.ndarray, product: str, path: str,
         values = dbz
         alpha = np.where(np.isnan(dbz), 0.0, 1.0)
 
+    alpha = np.where(np.nan_to_num(values, nan=-999.0) < DBZ_DRAW_MIN, 0.0, alpha)  # weaker than the first band: not drawn
     filled = np.nan_to_num(values, nan=vmin - 100)
     rgba = cmap(norm(filled))
     rgba[..., 3] = alpha * 0.85  # 0.85 cap -- bumped for contrast vs. Voyager
