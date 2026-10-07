@@ -540,6 +540,10 @@ PRODUCTS = {
     # image can't reach.
     "cni_ppz": {
         "url": "https://mausam.imd.gov.in/Radar/ppz_cni.gif",
+        # Same single-row colour-bar swatch fix as cni_maxz (see there): stray
+        # khaki rows matched terrain shading and gave ~200 false 35-40 dBZ px
+        # on about 20 archived frames since 1 Oct.
+        "min_swatch_rows": 2,
         "role": "regional_early_warning",
         "range_km": 600.0,         # printed directly ("Range: 600 km") -- genuinely more reach than Karaikal's 500km kkl_ppz
         "elevation_deg": -0.2,     # printed directly ("Elevation: -0.2 deg") -- a real single low-angle tilt, not a column-max product
@@ -2775,7 +2779,7 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 # were already fully defined in this file (PRODUCTS/PRODUCT_STYLE/
 # PRODUCT_RADAR/ARROW_MAX_RANGE_KM all already had entries for them) so
 # this line is the only change needed to turn them on for real here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz")
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
