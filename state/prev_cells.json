@@ -109,45 +109,66 @@
   ],
   "kkl_ppz": [
     {
-      "id": 3,
+      "id": 2,
       "product": "kkl_ppz",
       "centroid_latlon": [
-        10.774628158245287,
-        77.4719889008113
+        11.256389319001585,
+        77.43019124736182
       ],
-      "max_dbz": 35.7,
-      "pixel_count": 81,
-      "px": 174.50617283950618,
-      "py": 371.5061728395062,
-      "range_km": 258.9,
-      "beam_height_km": 4.86,
+      "max_dbz": 31.7,
+      "pixel_count": 21,
+      "px": 171.23809523809524,
+      "py": 333.14285714285717,
+      "range_km": 265.3,
+      "beam_height_km": 5.21,
       "elevated": true,
       "velocity_kmh": [
-        17.3,
-        192.0
+        18.3,
+        243.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 5,
+      "product": "kkl_ppz",
+      "centroid_latlon": [
+        10.734939118153559,
+        77.43709361215164
+      ],
+      "max_dbz": 31.7,
+      "pixel_count": 9,
+      "px": 171.77777777777777,
+      "py": 374.6666666666667,
+      "range_km": 263.1,
+      "beam_height_km": 5.0,
+      "elevated": true,
+      "velocity_kmh": [
+        9.7,
+        252.0
       ],
       "trend": "weakening",
       "confirmed_at_surface": false
     },
     {
-      "id": 12,
+      "id": 8,
       "product": "kkl_ppz",
       "centroid_latlon": [
-        8.66847343306507,
-        79.47136262322292
+        8.649287813098853,
+        79.43121725154093
       ],
-      "max_dbz": 30.7,
-      "pixel_count": 18,
-      "px": 330.8333333333333,
-      "py": 539.2222222222222,
-      "range_km": 254.2,
-      "beam_height_km": 4.69,
+      "max_dbz": 37.9,
+      "pixel_count": 36,
+      "px": 327.69444444444446,
+      "py": 540.75,
+      "range_km": 257.0,
+      "beam_height_km": 4.79,
       "elevated": true,
       "velocity_kmh": [
-        7.2,
-        244.0
+        11.1,
+        231.0
       ],
-      "trend": "unknown",
+      "trend": "intensifying",
       "confirmed_at_surface": false
     }
   ],
