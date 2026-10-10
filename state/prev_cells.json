@@ -131,47 +131,90 @@
   "kkl_ppz": [],
   "cni_maxz": [
     {
-      "id": 1,
+      "id": 4,
       "product": "cni_maxz",
       "centroid_latlon": [
-        12.131541441441442,
-        80.441633550045
+        12.038047947947947,
+        80.28377793636646
       ],
-      "max_dbz": 40.7,
-      "pixel_count": 5,
-      "px": 265.4,
-      "py": 355.4,
-      "range_km": 109.6,
+      "max_dbz": 44.0,
+      "pixel_count": 9,
+      "px": 248.33333333333334,
+      "py": 365.77777777777777,
+      "range_km": 117.3,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        1.6,
-        55.0
+        2.5,
+        267.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     },
     {
-      "id": 8,
+      "id": 9,
       "product": "cni_maxz",
       "centroid_latlon": [
-        11.606810258645742,
-        80.07750743310962
+        11.703838738738739,
+        80.30959904504924
       ],
-      "max_dbz": 45.2,
-      "pixel_count": 31,
-      "px": 226.03225806451613,
-      "py": 413.64516129032256,
-      "range_km": 165.5,
+      "max_dbz": 44.0,
+      "pixel_count": 8,
+      "px": 251.125,
+      "py": 402.875,
+      "range_km": 154.5,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
+        10.7,
+        240.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 10,
+      "product": "cni_maxz",
+      "centroid_latlon": [
+        11.596652006552008,
+        80.09570777163229
+      ],
+      "max_dbz": 44.0,
+      "pixel_count": 22,
+      "px": 228.0,
+      "py": 414.77272727272725,
+      "range_km": 166.5,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        11.1,
+        232.0
+      ],
+      "trend": "steady",
+      "confirmed_at_surface": false
+    }
+  ],
+  "cni_ppz": [
+    {
+      "id": 1,
+      "product": "cni_ppz",
+      "centroid_latlon": [
+        12.815339525239525,
+        82.64600380407924
+      ],
+      "max_dbz": 54.0,
+      "pixel_count": 21,
+      "px": 788.1904761904761,
+      "py": 441.04761904761904,
+      "range_km": 266.1,
+      "beam_height_km": 3.25,
+      "elevated": true,
+      "velocity_kmh": [
         0.2,
-        190.0
+        267.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
-  ],
-  "cni_ppz": []
+  ]
 }
