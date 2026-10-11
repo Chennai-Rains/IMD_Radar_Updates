@@ -297,6 +297,7 @@ PRODUCTS = {
         ],
     },
     "kkl_ppz": {
+        "radial_spoke_filter": True,   # interference spokes, see radial_spoke_mask
         "url": "https://mausam.imd.gov.in/Radar/ppz_kkl.gif",
         "role": "regional_early_warning",
         "range_km": 500.0,
@@ -337,6 +338,7 @@ PRODUCTS = {
         ],
     },
     "kkl_maxz": {
+        "radial_spoke_filter": True,   # interference spokes, see radial_spoke_mask
         "url": "https://mausam.imd.gov.in/Radar/caz_kkl.gif",
         "role": "aloft_early_warning",
         "range_km": 250.0,
@@ -1423,6 +1425,61 @@ def nearest_dbz(pixel_rgb: tuple[int, int, int],
 DIST_THRESHOLD = 2
 
 
+def radial_spoke_mask(dbz: np.ndarray, site_local: tuple, px_per_km: float,
+                      min_km: float = 50.0, gap_km: float = 16.0,
+                      az_bin: float = 0.5, side_bins: int = 3) -> np.ndarray:
+    """True where decoded echo lies on a radial interference spoke.
+
+    Interference from another transmitter paints thin wedges that run
+    straight out from the radar for 100+ km (11 Oct 2026: Karaikal MAXZ
+    spokes towards Salem/Erode/Dindigul read as 35-45 dBZ storm bands and fed
+    false alerts). A spoke is an azimuth bin with echo along a near-continuous
+    radial run of at least ``min_km`` whose neighbours 2.5-4 degrees either
+    side are almost empty over the same range interval (real echo areas are
+    wider than that). The marked bins are widened by ``side_bins`` because
+    the wedges fan out with range."""
+    h, w = dbz.shape
+    m = ~np.isnan(dbz)
+    ys, xs = np.where(m)
+    out = np.zeros((h, w), dtype=bool)
+    if len(xs) == 0:
+        return out
+    dx = xs - site_local[0]
+    dy = site_local[1] - ys
+    r = np.hypot(dx, dy) / px_per_km
+    th = np.degrees(np.arctan2(dx, dy)) % 360.0
+    nT = int(round(360.0 / az_bin))
+    tb = (th / az_bin).astype(int) % nT
+    rb = (r / 2.0).astype(int)
+    M = np.zeros((nT, int(rb.max()) + 2), dtype=bool)
+    M[tb, rb] = True
+    S = np.zeros_like(M)
+    gap = int(gap_km / 2.0)
+    minb = int(min_km / 2.0)
+    far = [int(round(k / az_bin)) for k in (-4.0, -3.5, -3.0, -2.5, 2.5, 3.0, 3.5, 4.0)]
+    for t in range(nT):
+        idx = np.flatnonzero(M[t])
+        if idx.size == 0:
+            continue
+        start = prev = idx[0]
+        for i in list(idx[1:]) + [None]:
+            if i is None or i - prev > gap:
+                if prev - start + 1 >= minb:
+                    seg = slice(start, prev + 1)
+                    side = np.mean([M[(t + k) % nT, seg].mean() for k in far])
+                    if side < 0.15:
+                        S[t, seg] = True
+                if i is not None:
+                    start = i
+            if i is not None:
+                prev = i
+    S2 = S.copy()
+    for k in range(1, side_bins + 1):
+        S2 |= np.roll(S, k, axis=0) | np.roll(S, -k, axis=0)
+    out[ys, xs] = S2[tb, rb]
+    return out
+
+
 def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray:
     cfg = PRODUCTS[product]
     l, t, r, b = cfg["plot_bbox"]
@@ -1491,6 +1548,11 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         yy, xx = np.mgrid[0:h, 0:w]
         dist_km = np.hypot(xx - (site_x - l), yy - (site_y - t)) / km_per_px
         dbz[dist_km < mask_within_km] = np.nan
+
+    if cfg.get("radial_spoke_filter"):
+        site_x, site_y = cfg["site_px"]
+        spoke = radial_spoke_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
+        dbz[spoke] = np.nan
 
     despeckle_min_px = cfg.get("despeckle_min_px")
     if despeckle_min_px is not None:
