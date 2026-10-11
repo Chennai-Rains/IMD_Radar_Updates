@@ -656,7 +656,12 @@ ELEVATED_BEAM_THRESHOLD_KM = 1.5
 # on a stale one for up to 30 minutes. Deliberately not exactly 15 (the
 # upload cadence, see nowcast.yml/cron-job.org) so a reload rarely lands
 # on exactly the same moment as an in-progress upload every single cycle.
-AUTOREFRESH_MINUTES = 10
+AUTOREFRESH_MINUTES = 5
+# 11 Oct 2026: 10 -> 5, together with the cron-job.org schedule going from
+# 10 to 5 minutes, so an open tab picks up each new cycle (each radar posts on
+# its own schedule). A random 0-20 s is added to every reload so a tab does
+# not stay locked to the same moment of the 5-minute cycle, which could keep
+# landing on the upload (FTP is not atomic).
 
 # A tab left open and VISIBLE but genuinely unattended (monitor left on,
 # browser forgotten in a window nobody's looked at) still shouldn't poll
@@ -2229,7 +2234,7 @@ def build_autorefresh_script(interval_minutes: int = AUTOREFRESH_MINUTES,
     clearTimer();
     if (document.visibilityState !== 'visible' || isIdle()) return;
     var remaining = Math.max(INTERVAL_MS - (Date.now() - loadTime), 0);
-    timer = setTimeout(function() {{ window.location.reload(); }}, remaining);
+    timer = setTimeout(function() {{ window.location.reload(); }}, remaining + Math.random() * 20000);
   }}
 
   document.addEventListener('visibilitychange', function() {{
