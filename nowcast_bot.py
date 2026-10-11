@@ -137,6 +137,27 @@ RADAR_SITES = {
         "site_elev_m": 6.0,        # UNVERIFIED — Chennai-area average-elevation guess
         "band": "S",               # per direct report -- S-band, unlike NIOT/Karaikal/Kochi
     },
+
+    # --- Fifth radar: IMD's Mangalore CAZ MAXZ (caz_mlr.gif), 250km range,
+    # test-repo-only for now per explicit instruction ("add CAZ ... to the
+    # test version. Once it works well then we can shift to production").
+    # UNVERIFIED -- unlike kochi/chennai above, this is a plain public
+    # estimate of the radar's town (Bajpe, next to Mangalore
+    # International Airport -- IMD's own site diagrams/NOTAMs place the
+    # DWR on airport grounds), NOT measured from the image's own geometry
+    # the way kochi/chennai's site_lat/site_lon were. The image-pixel-
+    # facing calibration (site_px/km_per_px in PRODUCTS["mlr_maxz"] below)
+    # is independently measured and doesn't depend on this being exactly
+    # right -- only the Leaflet-map-facing marker position does. Worth
+    # replacing with a confirmed coordinate (or re-deriving from the
+    # image's own gridlines/landmarks, the way chennai's was) before this
+    # ever reaches production.
+    "mangalore": {
+        "site_lat": 12.9500,
+        "site_lon": 74.8900,
+        "site_elev_m": 90.0,       # UNVERIFIED -- Bajpe plateau elevation, public-estimate
+        "band": "S",               # UNVERIFIED -- assumed consistent with Chennai/Kochi/Karaikal coastal DWRs, not confirmed for this site
+    },
 }
 
 PRODUCT_RADAR = {
@@ -144,6 +165,7 @@ PRODUCT_RADAR = {
     "kkl_ppi": "karaikal", "kkl_ppz": "karaikal", "kkl_maxz": "karaikal",
     "koc_maxz": "kochi",
     "cni_maxz": "chennai", "cni_ppz": "chennai",
+    "mlr_maxz": "mangalore",
 }
 
 EFFECTIVE_EARTH_RADIUS_KM = 8494.0  # standard 4/3-Earth-radius model
@@ -597,6 +619,164 @@ PRODUCTS = {
         "label_exclude_boxes": [
             (705, 685, 799, 800),   # national emblem/seal, bottom-right of the plot panel
         ],
+    },
+
+    # --- Mangalore CAZ MAXZ (caz_mlr.gif), 250km range -- test-repo-only
+    # for now (see calibration-status comment above RADAR_SITES).
+    #
+    # A THIRD distinct panel layout, different from both of the other two
+    # families already in this dict: NIOT/karaikal's square plot_bbox with
+    # printed "XX km" range-ring text labels along one axis, and
+    # kochi/chennai's "Max with panels" layout with full printed lat/lon
+    # gridlines -- this one is a circular plan-view with radial spokes and
+    # concentric range rings (0/100/200km labeled, extending out to the
+    # product's actual 250km range), no lat/lon gridlines printed at all.
+    # That ruled out this dict's two existing calibration methods (gridline
+    # peak-scan; printed "XX km" label boxes read directly as the ring
+    # distance) and needed a different approach:
+    #
+    # 1. A real frame was fetched via a one-off GitHub Actions workflow
+    #    (fetch_calibration_sample.yml) since this sandbox's own network
+    #    can't reach mausam.imd.gov.in directly -- same restriction that
+    #    drives the whole pipeline running on Actions in the first place.
+    #    Confirmed 1310x1080, single frame, matches the live site's own
+    #    screenshots.
+    # 2. plot_bbox found via per-column/row dark-pixel transition scans for
+    #    the panel border, giving (0, 200, 879, 1080) -- the circular
+    #    plan-view panel occupies the left ~879px of the 1310px-wide frame
+    #    (the colorbar + timestamp/metadata text live to the right of it).
+    # 3. site_px was NOT found from a literal site-icon marker -- a cluster
+    #    of blue dashed pixels near the "0.0 km" label initially looked
+    #    like one, but on closer inspection was coastline/state-border dash
+    #    rendering, not a genuine site marker (a real caught-and-corrected
+    #    mistake during calibration, not a known IMD convention). Instead,
+    #    site_px was found by LINEAR EXTRAPOLATION along the labeled
+    #    reference spoke: the "200.0 km" and "100.0 km" range-ring text
+    #    labels on that spoke gave a reliable two-point line (their pixel
+    #    gap matches a consistent km_per_px), extrapolated inward to where
+    #    "0.0 km" (the site itself) must sit -- the "0.0 km" label's own
+    #    printed TEXT position was NOT used directly, since (unlike the
+    #    other two labels, which sit right next to their true tick
+    #    positions) its text is offset well away from the actual site
+    #    point, which is what caused an initial ~2x km_per_px inconsistency
+    #    before this was caught.
+    # 4. Cross-validated two independent ways before trusting it: (a) the
+    #    derived site_px/km_per_px pair puts the panel's top and right
+    #    edges almost exactly 250km (this product's own stated max range)
+    #    from the site, as geometry demands; (b) the extrapolated point
+    #    lands almost exactly on the frame's own printed "IXE AP" label
+    #    (Mangalore International Airport's IATA code) -- consistent with
+    #    IMD siting this DWR on airport grounds, same real-world landmark
+    #    RADAR_SITES["mangalore"]'s site_lat/site_lon estimate is also
+    #    based on (though that lat/lon itself is still UNVERIFIED/not
+    #    image-derived, see that comment).
+    #
+    # CORRECTED -- despite its name, "km_per_px" is used throughout this
+    # dict as a PIXELS-per-km scale: pixel_to_latlon()/latlon_to_pixel()
+    # both DIVIDE a pixel distance by this field to get km (see those
+    # functions, and the comment just above PRODUCTS calling the same
+    # quantity an "isotropic px-per-km scale"). The value originally
+    # entered here (0.5773) was instead the true km-PER-pixel (100km-ring-
+    # to-200km-ring pixel gap of ~173px -> 1.73 px/km, inverted by
+    # mistake) -- harmless for every other product in this file so far
+    # only because kochi/chennai's own measured values happened to be
+    # close to 1.0 either way, so the bug went unnoticed until a real
+    # frame showed cells and district borders rendering roughly 3x
+    # (1.732^2 worth of distance-vs-area confusion, not literally 3x
+    # linearly, but the effect compounds the same way) further from the
+    # site than the real 250km range allows -- echo that's really just
+    # off the coast of Mangaluru was landing as far out as Chennai and
+    # Telangana on the Leaflet map, caught from a live screenshot. Fixed
+    # value below is the reciprocal (1/0.5773 = 1.732), which also
+    # matches the directly-measured 173px-per-100km ring gap and the
+    # panel-edge-vs-250km-range cross-check in point 4 above exactly.
+    # 5. colorbar_bbox measured by locating the colorbar's exact swatch
+    #    pixel bounds, deliberately excluding the ~15px solid black frame
+    #    surrounding it (found at roughly x=1161-1176 and x=1218-1228) --
+    #    build_lut_from_colorbar() samples the horizontal-middle column of
+    #    this bbox per source row, so including any of that black border
+    #    would corrupt the LUT with spurious near-black entries.
+
+    "mlr_maxz": {
+        "url": "https://mausam.imd.gov.in/Radar/caz_mlr.gif",
+        "role": "aloft_early_warning",
+        "range_km": 250.0,         # printed directly in the frame's own metadata panel
+        "elevation_deg": None,     # column-max, not a single tilt -- same as every other MAXZ product here
+        "image_size": (1310, 1080),
+        "site_px": (446.0, 633.0),  # extrapolated from the 100/200km ring labels, NOT the "0.0 km" label itself -- see calibration-status comment above
+        "km_per_px": 1.7320,  # pixels-per-km, despite the field's name -- see CORRECTED comment above (was mistakenly stored as the inverse, 0.5773)
+        "colorbar_bbox": (1177, 363, 1216, 816),
+        "value_at_top": 60.0,      # same uniform 2.5dB/band MAX(dBZ) scale as every other MAXZ/PPZ product
+        "value_at_bottom": 20.0,
+        "timestamp_bbox": (1080, 90, 1310, 110),
+        "elevation_bbox": None,    # no elevation line -- column-max product
+        "plot_bbox": (0, 200, 879, 1080),
+        "cell_dbz_threshold": 35,  # matches every other MAXZ product here
+        # The three printed "XX.X km" range-ring labels along the
+        # reference spoke used for site_px extrapolation above (see that
+        # comment) -- boxed out the same reason every other product here
+        # boxes its own printed range-ring text: these sit at fixed pixel
+        # positions regardless of the data frame and would otherwise read
+        # as unchanging "cells" every cycle.
+        "label_exclude_boxes": [
+            (428, 277, 485, 300),   # "200.0 km" label
+            (436, 449, 485, 469),   # "100.0 km" label
+            (443, 536, 524, 557),   # "0.0 km" label
+        ],
+        # REBUILT -- the first version of this mask (see git history for
+        # the original comment) only targeted the thin state/district
+        # border lines. Reported directly, with a live screenshot: a much
+        # bigger problem than borders was still getting through -- this
+        # product's whole on-screen basemap is a permanently-visible,
+        # fully-colored LAND/SEA ELEVATION LAYER (tan/gold inland
+        # highlands, green coastal lowland, cyan/blue sea depth shading --
+        # see the frame itself), unlike every other radar here, which only
+        # paints colored pixels where there's real echo. That terrain
+        # layer is rendered as a dithered GIF (a limited color palette
+        # approximating a smooth elevation gradient), and enough of that
+        # dithering lands within DIST_THRESHOLD of a real dBZ swatch that
+        # nearly the entire visible coastline decoded as a solid green/
+        # blue/yellow "storm" the width of the whole state -- confirmed by
+        # sampling real terrain pixels directly and checking their nearest-
+        # swatch distance (plenty under 2). The original line-only mask
+        # never caught this because its final step (binary_opening) was
+        # deliberately built to KEEP wide blob-shaped regions, assuming
+        # only a real storm could be blob-shaped -- exactly backwards for
+        # a terrain layer that's itself one enormous blob.
+        #
+        # Fix: drop the shape-based (line vs blob) split entirely and go
+        # back to pure cross-frame persistence, but tolerant rather than
+        # exact -- checking a handful of individual terrain pixels across
+        # frames showed the dithered color at a given spot drifts by only
+        # a few RGB units cycle to cycle (GIF quantization noise), never
+        # matching bit-for-bit, which is why a first attempt at EXACT
+        # per-pixel equality across frames only flagged ~28% of the panel
+        # as static instead of the terrain's real extent. Per pixel: take
+        # the per-channel MEDIAN color across several real archived frames,
+        # then the worst-case (max) Euclidean distance any single frame's
+        # pixel strays from that median; a pixel whose color never strays
+        # more than 12 units from its own median across every sampled
+        # frame is treated as static background (terrain, borders, range
+        # rings all included) and excluded, regardless of its shape or
+        # size -- a real storm moving or changing intensity cycle to cycle
+        # strays much further than that at the pixels it touches, so it
+        # survives. Built from 7 real frames spanning 11:20 UTC on
+        # 2026-10-01 to 22:20 UTC on 2026-10-02 (the
+        # fetch_calibration_sample.yml sample plus six cycles the live
+        # test pipeline had archived by then); visually confirmed against
+        # several of those frames that the huge false coastal blob is gone
+        # and the handful of remaining colored patches match real storm
+        # activity visible over open water in the source GIF. Worth
+        # regenerating (same method, more/later frames, retune the 12-unit
+        # tolerance if needed) once this has run through more real weather
+        # -- and worth checking first whether a future false patch is
+        # terrain that outlasted this mask's sample window or genuine echo
+        # before assuming it's a bug.
+        "static_exclude_mask": "masks/mlr_maxz_static_exclude.png",
+        # See decode_reflectivity's erode_thin_residual comment -- cleans
+        # up thin border-line fragments the static mask's tolerance
+        # doesn't catch, without touching real storm blobs.
+        "erode_thin_residual": True,
     },
 }
 
@@ -1335,6 +1515,31 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
             if len(small_labels):
                 dbz[np.isin(labeled, small_labels)] = np.nan
 
+
+    if cfg.get("erode_thin_residual"):
+        # First needed for mlr_maxz: its static_exclude_mask (a per-pixel
+        # cross-frame tolerance check, see that field's comment) catches
+        # the huge terrain/basemap false-echo blob, but leaves behind thin
+        # squiggly leftover fragments along state/district border lines --
+        # places where antialiasing against the terrain varies by just
+        # enough, frame to frame, to exceed that mask's tolerance even
+        # though the line itself never moves. despeckle_min_px alone can't
+        # clean these up: a border line's total pixel count easily exceeds
+        # any reasonable despeckle floor even though it's only 1-2px WIDE,
+        # so a floor high enough to drop it would also drop real small
+        # storms. binary_opening instead erodes by SHAPE, not size -- it
+        # peels off anything thinner than the 3x3 structuring element
+        # (true lines) while leaving wider real storm blobs intact, the
+        # same shape-vs-color distinction static_exclude_mask's own
+        # original (pre-rebuild) version used, just applied live here
+        # instead of baked into one static frame. Cut this product's
+        # false cell count from 300+ (static mask alone) to single/low-
+        # double digits across every sampled real frame. Opt-in and
+        # generic, same pattern as despeckle_min_px/mask_within_km -- a
+        # no-op for every product that doesn't set it.
+        opened = ndimage.binary_opening(~np.isnan(dbz), structure=np.ones((3, 3)))
+        dbz[~opened] = np.nan
+
     return dbz
 
 
@@ -1678,6 +1883,7 @@ PRODUCT_STYLE = {
     "koc_maxz": {"color": "#2ca02c", "label": "Kochi MAXZ - aloft / building"},
     "cni_maxz": {"color": "#e377c2", "label": "Chennai DWR MAXZ - aloft / building"},
     "cni_ppz": {"color": "#7f7f7f", "label": "Chennai Extended Radar"},
+    "mlr_maxz": {"color": "#bcbd22", "label": "Mangaluru DWR MAXZ - aloft / building"},
 }
 
 RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR",
@@ -2784,7 +2990,7 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 # were already fully defined in this file (PRODUCTS/PRODUCT_STYLE/
 # PRODUCT_RADAR/ARROW_MAX_RANGE_KM all already had entries for them) so
 # this line is the only change needed to turn them on for real here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz")
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz", "mlr_maxz")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
