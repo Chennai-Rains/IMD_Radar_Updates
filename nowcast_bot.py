@@ -158,6 +158,18 @@ RADAR_SITES = {
         "site_elev_m": 90.0,       # UNVERIFIED -- Bajpe plateau elevation, public-estimate
         "band": "S",               # UNVERIFIED -- assumed consistent with Chennai/Kochi/Karaikal coastal DWRs, not confirmed for this site
     },
+
+    # --- Sixth radar: IMD's Trivandrum (Thumba, "CDWRTERLS") MAXZ, caz_tvm.gif.
+    # Added 11 Oct 2026 to the TEST repo only, while Kochi is under maintenance;
+    # its update schedule is erratic compared with the other radars. Site
+    # coordinates are the ones the frame prints itself ("8.5374N, 76.8657E",
+    # height 27 m); 240 km range, 0.9 km per pixel.
+    "trivandrum": {
+        "site_lat": 8.5374,
+        "site_lon": 76.8657,
+        "site_elev_m": 27.0,       # printed in the frame's metadata panel
+        "band": "S",               # UNVERIFIED -- not stated on the frame
+    },
 }
 
 PRODUCT_RADAR = {
@@ -166,6 +178,7 @@ PRODUCT_RADAR = {
     "koc_maxz": "kochi",
     "cni_maxz": "chennai", "cni_ppz": "chennai",
     "mlr_maxz": "mangalore",
+    "tvm_ppi": "trivandrum",
 }
 
 EFFECTIVE_EARTH_RADIUS_KM = 8494.0  # standard 4/3-Earth-radius model
@@ -621,6 +634,40 @@ PRODUCTS = {
         "label_exclude_boxes": [
             (705, 685, 799, 800),   # national emblem/seal, bottom-right of the plot panel
         ],
+    },
+
+    # --- Trivandrum PPI (ppi_tvm.gif), 2.0 deg elevation. Added 11 Oct 2026 to
+    # replace tvm_maxz (test only, never ported): the column-max picture carried false
+    # strong echo along the Ghats ridge (clutter filter OFF), the 2 deg tilt
+    # does not. Same frame layout family as tvm_maxz but the plan view is
+    # bigger: azimuth lines cross at (369, 371), the outer 240 km ring has a
+    # 326 px radius (1 px = 0.736 km), plan view x 0-737, y 41-700. Colour bar
+    # is the same 15 swatches (x 748-783, y 428-695) but each band is 4.33 dBZ
+    # wide (0-4.33 at the bottom ... 60.67-65+ at the top).
+    "tvm_ppi": {
+        "url": "https://mausam.imd.gov.in/Radar/ppi_tvm.gif",
+        "role": "aloft_early_warning",
+        "range_km": 240.0,
+        "elevation_deg": 2.0,
+        "image_size": (1082, 720),
+        "site_px": (369.0, 371.0),
+        "km_per_px": 1.3583,       # pixels per km (326 px / 240 km)
+        "colorbar_bbox": (748, 428, 784, 696),
+        "colorbar_bands": [63.0, 58.5, 54.2, 49.8, 45.5, 41.2, 36.8, 32.5, 28.2, 23.8, 19.5, 15.2, 10.8, 6.5, 2.2],
+        "value_at_top": 65.0,
+        "value_at_bottom": 0.0,
+        "timestamp_bbox": (0, 0, 425, 45),
+        "elevation_bbox": None,
+        "plot_bbox": (0, 41, 738, 700),
+        "cell_dbz_threshold": 35,
+        "exclude_colors": [(204, 204, 204)],
+        "min_swatch_rows": 2,
+        "despeckle_min_px": 8,
+        "min_strong_blob": (36.0, 45),
+        "min_strong_core": (36.0, 5),
+        # inner 125 km only: ridge echo over Idukki/Theni/Dindigul caused false
+        # alerts on 11 Oct 2026 even on the 2 deg tilt
+        "max_range_km": 125.0,
     },
 
     # --- Mangalore CAZ MAXZ (caz_mlr.gif), 250km range -- test-repo-only
@@ -1212,7 +1259,11 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     # patterns.
     m = re.search(r"Date:\s*(\d{1,2}/\d{1,2}/\d{4}).*?Time:\s*(\d{2}:\d{2}:\d{2})\s*UTC",
                    text, re.DOTALL)
-    if m:
+    tvm = re.search(r"(\d{4}/\d{2}/\d{2})\s*(\d{2}:\d{2}:\d{2})\s*\(?\s*UTC", text)
+    if tvm:
+        # Trivandrum: "2026/10/11" then "00:49:33 (UTC)", year first
+        date_str, time_str, date_fmt = tvm.group(1), tvm.group(2), "%Y/%m/%d"
+    elif m:
         date_str, time_str, date_fmt = m.group(1), m.group(2), "%d/%m/%Y"
     else:
         # \D{0,3} before the day: Tesseract occasionally inserts a stray
@@ -1313,10 +1364,16 @@ def build_lut_from_colorbar(img: Image.Image, product: str) -> list[tuple[tuple[
         top_val, bot_val = cfg["value_at_top"], cfg["value_at_bottom"]
         values = top_val + (bot_val - top_val) * (np.arange(h) / (h - 1))
 
+    bands = cfg.get("colorbar_bands")
     lut = []
     for y in range(h):
         rgb = tuple(int(v) for v in bar[y, bar.shape[1] // 2])
-        lut.append((rgb, round(float(values[y]), 1)))
+        if bands:
+            # equal-height bands, top to bottom: every row of a band gets that band's value
+            val = bands[min(int(y / h * len(bands)), len(bands) - 1)]
+        else:
+            val = round(float(values[y]), 1)
+        lut.append((rgb, val))
     min_rows = cfg.get("min_swatch_rows")
     if min_rows:
         from collections import Counter
@@ -1554,6 +1611,17 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         spoke = radial_spoke_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
         dbz[spoke] = np.nan
 
+    max_range_km = cfg.get("max_range_km")
+    if max_range_km is not None:
+        # Far-field cut-off, first for tvm_maxz: beyond ~160 km its picture
+        # (clutter filter OFF) carries ridge-aligned strong specks over the
+        # Idukki-Munnar-Theni Ghats that raised false "intense" alerts on
+        # 11 Oct 2026. Opt-in, no-op elsewhere.
+        site_x, site_y = cfg["site_px"]
+        yy, xx = np.mgrid[0:h, 0:w]
+        far = np.hypot(xx - (site_x - l), yy - (site_y - t)) / cfg["km_per_px"] > max_range_km
+        dbz[far] = np.nan
+
     despeckle_min_px = cfg.get("despeckle_min_px")
     if despeckle_min_px is not None:
         # Isolated-pixel/few-pixel noise -- distinct from extract_cells'
@@ -1577,6 +1645,40 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
             if len(small_labels):
                 dbz[np.isin(labeled, small_labels)] = np.nan
 
+
+    strong = cfg.get("min_strong_blob")
+    if strong:
+        # First needed for tvm_maxz (11 Oct 2026): with the radar's clutter
+        # filter OFF, a ragged string of 1-38 px orange/red specks appeared
+        # along the Kerala-Tamil Nadu ridge (Idukki-Theni) for a single scan
+        # and read as 50 dBZ storms over Theni district. Real convective
+        # cores are far larger than that, so an isolated blob of strong
+        # echo smaller than "px" pixels is capped just below the threshold
+        # (it stays on the map as weak echo, but cannot raise an alert).
+        # Opt-in, no-op for every product that does not set it.
+        thr, min_px = strong
+        big = np.nan_to_num(dbz, nan=0.0) >= thr
+        lab_s, n_s = ndimage.label(big, structure=np.ones((3, 3)))
+        if n_s > 0:
+            sz = ndimage.sum(big, lab_s, index=np.arange(1, n_s + 1))
+            small = np.flatnonzero(sz < min_px) + 1
+            if len(small):
+                dbz[np.isin(lab_s, small)] = thr - 2.0
+
+    core = cfg.get("min_strong_core")
+    if core:
+        # tvm_ppi (12 Oct 2026): a 25 km x 3.5 km streak of 54 dBZ along the
+        # Ghats showed in a single frame and later fed an "intense" alert,
+        # while no strong storm existed. Real storm cores (the midnight
+        # Kanyakumari cells) hold a solid k x k block of strong pixels; thin
+        # streaks do not. A connected strong (>= thr) area with no k x k block
+        # anywhere inside it is capped just below thr; areas that do contain
+        # one are kept whole. Opt-in, no-op elsewhere.
+        thr, k = core
+        strong_m = np.nan_to_num(dbz, nan=0.0) >= thr
+        solid = ndimage.binary_opening(strong_m, structure=np.ones((k, k)))
+        keep = ndimage.binary_propagation(solid, structure=np.ones((3, 3)), mask=strong_m)
+        dbz[strong_m & ~keep] = thr - 2.0
 
     if cfg.get("erode_thin_residual"):
         # First needed for mlr_maxz: its static_exclude_mask (a per-pixel
@@ -1946,10 +2048,11 @@ PRODUCT_STYLE = {
     "cni_maxz": {"color": "#e377c2", "label": "Chennai DWR MAXZ - aloft / building"},
     "cni_ppz": {"color": "#7f7f7f", "label": "Chennai Extended Radar"},
     "mlr_maxz": {"color": "#bcbd22", "label": "Mangaluru DWR MAXZ - aloft / building"},
+    "tvm_ppi": {"color": "#9467bd", "label": "Trivandrum DWR PPI (2 deg)"},
 }
 
 RADAR_MARKER_LABEL = {"niot": "NIOT X-DWR Chennai", "karaikal": "Karaikal DWR",
-                       "kochi": "Kochi DWR"}
+                       "kochi": "Kochi DWR", "trivandrum": "Trivandrum DWR"}
 
 # CARTO now requires an API key even for the free Voyager basemap tiles.
 # NOTE: this key travels in the tile URL itself, so it's visible to anyone
@@ -3052,7 +3155,7 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 # were already fully defined in this file (PRODUCTS/PRODUCT_STYLE/
 # PRODUCT_RADAR/ARROW_MAX_RANGE_KM all already had entries for them) so
 # this line is the only change needed to turn them on for real here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz", "mlr_maxz")
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz", "mlr_maxz", "tvm_ppi")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
