@@ -3167,7 +3167,9 @@ OUTPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
 # were already fully defined in this file (PRODUCTS/PRODUCT_STYLE/
 # PRODUCT_RADAR/ARROW_MAX_RANGE_KM all already had entries for them) so
 # this line is the only change needed to turn them on for real here.
-POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "cni_ppz", "mlr_maxz", "tvm_ppi")
+# cni_ppz (Chennai Extended) switched off 12 Oct 2026: its 250-600 km ring drew ~400 strong echo px inside Karaikal's range
+# where Karaikal MAXZ showed none. Add it back here once it is validated against the short-range radars.
+POLLED_PRODUCTS = ("maxz", "kkl_maxz", "kkl_ppz", "cni_maxz", "mlr_maxz", "tvm_ppi")
 
 # How many archived frames to keep per product. Kept small on purpose --
 # this repo is committing binary GIFs on every run, and unlike the
