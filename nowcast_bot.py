@@ -597,7 +597,11 @@ PRODUCTS = {
         # by coastline/labels right at the site) crosshair marker and landed
         # within a few px, consistent with each other.
         "site_px": (392.6, 395.3),
-        "km_per_px": 1.500,        # frame's own metadata prints "Resolution: 1.500 km/pixel" -- confirmed independently via the gridline fit on both axes (within ~1.5%)
+        # Despite the key's name this is PIXELS PER KM like every other product here: the frame's metadata
+        # says "Resolution: 1.500 km/pixel", i.e. 1/1.5 px per km. It was entered as 1.5, which put every
+        # echo 2.25x too close to Chennai and made the 250 km inner mask swallow the whole image except its
+        # outer rim. Fixed 12 Oct 2026, together with the terrain guards below.
+        "km_per_px": 1.0 / 1.5,
         "colorbar_bbox": (820, 74, 884, 525),
         "value_at_top": 60.0,      # same uniform 2.5dB/band MAX(dBZ) scale as every other product here
         "value_at_bottom": 20.0,
@@ -610,6 +614,12 @@ PRODUCTS = {
         # kkl_ppz above for the full reasoning. Labeled "Chennai Extended
         # Radar" on the page (PRODUCT_STYLE), same naming pattern as
         # Karaikal's masked product.
+        # Terrain shading in this frame decodes as 35-58 dBZ echo when the dithered colour bar happens to give the
+        # LUT the brown relief colours (about 11,900 px, Western Ghats / Karnataka -- once the km_per_px error is
+        # fixed it is no longer hidden by accident). Two guards: the relief's own colours are excluded
+        # (exclude_colors below), and static_exclude_mask holds every pixel that read as echo in >= 25 % of 24
+        # frames spread over 30 Sep - 12 Oct, grown 2 px for the dither.
+        "static_exclude_mask": "masks/cni_ppz_static_exclude.png",
         "mask_within_km": 250.0,
         # Same open-water texture-collision risk as cni_maxz (same vendor
         # software/palette, same symptom expected) -- starting from
@@ -630,6 +640,8 @@ PRODUCTS = {
         "exclude_colors": [
             (102, 204, 255), (153, 204, 255), (102, 153, 255), (153, 153, 255),
             (102, 153, 204), (102, 204, 204), (153, 153, 204), (153, 204, 204),
+            # the relief's own colours (12 Oct 2026): ~11,900 px of Western Ghats / Karnataka terrain
+            (204, 153, 51), (204, 102, 51), (102, 51, 51), (204, 204, 51), (153, 51, 51),
         ],
         "label_exclude_boxes": [
             (705, 685, 799, 800),   # national emblem/seal, bottom-right of the plot panel
