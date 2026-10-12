@@ -238,5 +238,27 @@
   ],
   "cni_ppz": [],
   "mlr_maxz": [],
-  "tvm_ppi": []
+  "tvm_ppi": [
+    {
+      "id": 1,
+      "product": "tvm_ppi",
+      "centroid_latlon": [
+        9.561578120548583,
+        77.20719196470574
+      ],
+      "max_dbz": 45.5,
+      "pixel_count": 48,
+      "px": 419.9166666666667,
+      "py": 175.58333333333334,
+      "range_km": 119.9,
+      "beam_height_km": 5.06,
+      "elevated": true,
+      "velocity_kmh": [
+        9.5,
+        199.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ]
 }
