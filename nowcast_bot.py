@@ -476,6 +476,7 @@ PRODUCTS = {
         # Drop colour-bar swatches only 1 row tall: on some frames the bar's
         # anti-aliasing leaves a stray khaki row that matches terrain shading
         # (Eastern Ghats) and was decoded as ~40 dBZ (false alert 7 Oct 01:51 IST).
+        "far_noise_gate": {"from_km": 130.0, "min_dbz": 30.0, "min_px": 30},   # see decode_reflectivity
         "min_swatch_rows": 2,
         "role": "aloft_early_warning",
         "range_km": 250.0,         # printed directly in the frame's own metadata panel ("Range: 250 km")
@@ -1669,6 +1670,23 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         yy, xx = np.mgrid[0:h, 0:w]
         far = np.hypot(xx - (site_x - l), yy - (site_y - t)) / cfg["km_per_px"] > max_range_km
         dbz[far] = np.nan
+
+    far_gate = cfg.get("far_noise_gate")
+    if far_gate:
+        # Range-dependent noise floor, first for cni_maxz (14 Oct 2026): its picture carries a ring of 20-25 dBZ noise
+        # speckle between about 150 and 250 km (~17,000 px in one frame) which the map smoothing turned into soft arcs
+        # around Chennai. Beyond from_km: drop echo weaker than min_dbz and any remaining blob smaller than min_px.
+        # Opt-in, no-op elsewhere.
+        site_x, site_y = cfg["site_px"]
+        yy, xx = np.mgrid[0:h, 0:w]
+        far = np.hypot(xx - (site_x - l), yy - (site_y - t)) / cfg["km_per_px"] > far_gate["from_km"]
+        dbz[far & (dbz < far_gate["min_dbz"])] = np.nan
+        keep = ~np.isnan(dbz)
+        lab, nlab = ndimage.label(keep, structure=np.ones((3, 3)))
+        if nlab:
+            sizes = ndimage.sum(keep, lab, index=np.arange(1, nlab + 1))
+            small = np.isin(lab, np.where(sizes < far_gate["min_px"])[0] + 1) & far
+            dbz[small] = np.nan
 
     despeckle_min_px = cfg.get("despeckle_min_px")
     if despeckle_min_px is not None:
