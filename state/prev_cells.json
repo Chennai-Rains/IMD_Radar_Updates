@@ -2,45 +2,45 @@
   "maxz": [],
   "kkl_maxz": [
     {
-      "id": 1,
+      "id": 2,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        10.542179945278647,
-        81.45646200086124
+        10.54897901076564,
+        81.36306608185534
       ],
-      "max_dbz": 36.4,
-      "pixel_count": 14,
-      "px": 443.14285714285717,
-      "py": 305.7857142857143,
-      "range_km": 181.9,
+      "max_dbz": 37.9,
+      "pixel_count": 11,
+      "px": 432.54545454545456,
+      "py": 305.0,
+      "range_km": 171.8,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        15.8,
-        336.0
+        7.7,
+        326.0
       ],
-      "trend": "unknown",
+      "trend": "steady",
       "confirmed_at_surface": false
     },
     {
-      "id": 3,
+      "id": 6,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        10.493350293144799,
-        81.22354448226199
+        9.807674840396057,
+        79.69992817365917
       ],
-      "max_dbz": 36.4,
-      "pixel_count": 7,
-      "px": 416.7142857142857,
-      "py": 311.42857142857144,
-      "range_km": 158.8,
+      "max_dbz": 38.1,
+      "pixel_count": 6,
+      "px": 243.83333333333334,
+      "py": 390.6666666666667,
+      "range_km": 125.2,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        10.0,
-        311.0
+        2.5,
+        300.0
       ],
-      "trend": "steady",
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
@@ -91,5 +91,27 @@
   ],
   "cni_ppi": [],
   "mlr_maxz": [],
-  "tvm_ppi": []
+  "tvm_ppi": [
+    {
+      "id": 1,
+      "product": "tvm_ppi",
+      "centroid_latlon": [
+        8.977802118970917,
+        75.9139937520443
+      ],
+      "max_dbz": 41.2,
+      "pixel_count": 90,
+      "px": 227.1,
+      "py": 263.6,
+      "range_km": 115.5,
+      "beam_height_km": 4.84,
+      "elevated": true,
+      "velocity_kmh": [
+        13.1,
+        327.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ]
 }
