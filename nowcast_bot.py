@@ -132,8 +132,8 @@ RADAR_SITES = {
     # coast -- plausible for a DWR siting, but still worth a sanity check
     # against the merged map once a few real cycles have run.
     "chennai": {
-        "site_lat": 13.0901,
-        "site_lon": 80.2067,
+        "site_lat": 13.083747,   # Chennai DWR, per user 15 Oct 2026 (was 13.0901 / 80.2067)
+        "site_lon": 80.290057,
         "site_elev_m": 6.0,        # UNVERIFIED — Chennai-area average-elevation guess
         "band": "S",               # per direct report -- S-band, unlike NIOT/Karaikal/Kochi
     },
