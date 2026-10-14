@@ -311,6 +311,7 @@ PRODUCTS = {
     },
     "kkl_ppz": {
         "radial_spoke_filter": True,   # interference spokes, see radial_spoke_mask
+        "radial_blob_filter": True,    # wide straight streaks, see radial_blob_mask
         "url": "https://mausam.imd.gov.in/Radar/ppz_kkl.gif",
         "role": "regional_early_warning",
         "range_km": 500.0,
@@ -1586,6 +1587,45 @@ def radial_spoke_mask(dbz: np.ndarray, site_local: tuple, px_per_km: float,
     return out
 
 
+def radial_blob_mask(dbz: np.ndarray, site_local: tuple, px_per_km: float,
+                     min_len_km: float = 100.0, min_aspect: float = 3.0,
+                     max_az_deg: float = 8.0) -> np.ndarray:
+    """True for connected echo blobs that are straight radial streaks.
+
+    Wide interference spokes (14 Oct 2026, Karaikal Extended, due west along
+    270 deg from 250 to 500 km, ~45 km thick) escape radial_spoke_mask because
+    their own width falls inside its side-comparison window. A real storm
+    area this long is also much wider than it is long-radially; a streak is
+    at least ``min_len_km`` radial, spans under ``max_az_deg`` of azimuth and
+    is at least ``min_aspect`` times longer radially than across."""
+    out = np.zeros(dbz.shape, dtype=bool)
+    keep = ~np.isnan(dbz)
+    if not keep.any():
+        return out
+    # bridge small gaps so a streak with holes stays one component
+    lab, n = ndimage.label(ndimage.binary_closing(keep, structure=np.ones((3, 3)), iterations=3),
+                           structure=np.ones((3, 3)))
+    for i, sl in enumerate(ndimage.find_objects(lab), start=1):
+        ys, xs = np.where(lab[sl] == i)
+        ys = ys + sl[0].start
+        xs = xs + sl[1].start
+        if len(xs) < 50:
+            continue
+        dx = xs - site_local[0]
+        dy = site_local[1] - ys
+        r = np.hypot(dx, dy) / px_per_km
+        th = np.degrees(np.arctan2(dx, dy))
+        th = (th - np.degrees(np.arctan2(dx.mean(), dy.mean()))+ 180.0) % 360.0 - 180.0
+        length = r.max() - r.min()
+        if length < min_len_km:
+            continue
+        az_span = th.max() - th.min()
+        across = np.radians(az_span) * r.mean()
+        if az_span <= max_az_deg and length >= min_aspect * max(across, 1.0):
+            out[ys, xs] = True
+    return out
+
+
 def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray:
     cfg = PRODUCTS[product]
     l, t, r, b = cfg["plot_bbox"]
@@ -1659,6 +1699,10 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         site_x, site_y = cfg["site_px"]
         spoke = radial_spoke_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
         dbz[spoke] = np.nan
+    if cfg.get("radial_blob_filter"):
+        site_x, site_y = cfg["site_px"]
+        streak = radial_blob_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
+        dbz[ndimage.binary_dilation(streak, iterations=2) & ~np.isnan(dbz)] = np.nan
 
     max_range_km = cfg.get("max_range_km")
     if max_range_km is not None:
