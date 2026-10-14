@@ -2,66 +2,45 @@
   "maxz": [],
   "kkl_maxz": [
     {
-      "id": 4,
+      "id": 6,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        10.705126883808816,
-        81.41363674673555
+        10.757621040558377,
+        81.40558852482684
       ],
-      "max_dbz": 38.4,
-      "pixel_count": 67,
-      "px": 438.2835820895522,
-      "py": 286.95522388059703,
-      "range_km": 173.8,
+      "max_dbz": 41.1,
+      "pixel_count": 54,
+      "px": 437.3703703703704,
+      "py": 280.8888888888889,
+      "range_km": 172.2,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        19.0,
-        300.0
+        12.5,
+        315.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
     },
     {
-      "id": 6,
+      "id": 9,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        10.693613676579828,
-        81.24368870008679
+        9.799382040824803,
+        79.67165282624364
       ],
-      "max_dbz": 37.4,
-      "pixel_count": 14,
-      "px": 419.0,
-      "py": 288.2857142857143,
-      "range_km": 155.7,
+      "max_dbz": 36.1,
+      "pixel_count": 8,
+      "px": 240.625,
+      "py": 391.625,
+      "range_km": 126.5,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        17.0,
-        296.0
+        3.4,
+        176.0
       ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 7,
-      "product": "kkl_maxz",
-      "centroid_latlon": [
-        9.801329045941532,
-        79.6643820226225
-      ],
-      "max_dbz": 39.2,
-      "pixel_count": 5,
-      "px": 239.8,
-      "py": 391.4,
-      "range_km": 126.4,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        13.0,
-        99.0
-      ],
-      "trend": "unknown",
+      "trend": "weakening",
       "confirmed_at_surface": false
     }
   ],
@@ -92,7 +71,7 @@
   "cni_ppi": [],
   "mlr_maxz": [
     {
-      "id": 2,
+      "id": 1,
       "product": "mlr_maxz",
       "centroid_latlon": [
         12.232192122838773,
@@ -107,9 +86,9 @@
       "elevated": false,
       "velocity_kmh": [
         0.0,
-        178.0
+        357.0
       ],
-      "trend": "unknown",
+      "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
