@@ -704,22 +704,85 @@
   ],
   "mlr_maxz": [
     {
-      "id": 3,
+      "id": 2,
       "product": "mlr_maxz",
       "centroid_latlon": [
-        12.154569643368719,
-        75.22296254257087
+        13.292259118240642,
+        75.14298584307295
       ],
-      "max_dbz": 46.4,
-      "pixel_count": 13,
-      "px": 508.38461538461536,
-      "py": 585.9230769230769,
-      "range_km": 95.5,
+      "max_dbz": 57.6,
+      "pixel_count": 5,
+      "px": 493.4,
+      "py": 367.2,
+      "range_km": 46.9,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        0.0,
-        168.0
+        0.9,
+        178.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 4,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        12.160888139871972,
+        75.22179929488823
+      ],
+      "max_dbz": 45.1,
+      "pixel_count": 24,
+      "px": 508.1666666666667,
+      "py": 584.7083333333334,
+      "range_km": 94.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        4.6,
+        346.0
+      ],
+      "trend": "steady",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 7,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        11.06096513062378,
+        74.26476021185582
+      ],
+      "max_dbz": 37.6,
+      "pixel_count": 41,
+      "px": 328.8536585365854,
+      "py": 796.170731707317,
+      "range_km": 220.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        20.0,
+        18.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 8,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        10.75013434747846,
+        74.13439731619862
+      ],
+      "max_dbz": 37.6,
+      "pixel_count": 28,
+      "px": 304.42857142857144,
+      "py": 855.9285714285714,
+      "range_km": 258.1,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        45.7,
+        315.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
