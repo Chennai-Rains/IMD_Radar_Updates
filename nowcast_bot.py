@@ -1572,10 +1572,14 @@ def radial_spoke_mask(dbz: np.ndarray, site_local: tuple, px_per_km: float,
         for i in list(idx[1:]) + [None]:
             if i is None or i - prev > gap:
                 if prev - start + 1 >= minb:
-                    seg = slice(start, prev + 1)
-                    side = np.mean([M[(t + k) % nT, seg].mean() for k in far])
-                    if side < 0.15:
-                        S[t, seg] = True
+                    # judged per ~20 km chunk, not over the whole run: a spoke that runs into a real storm
+                    # (15 Oct 2026, Karaikal MAXZ bearing 286 deg through Salem/Namakkal) has neighbours that are
+                    # empty only away from the storm, so a whole-run average wrongly cleared the entire spoke
+                    for c0 in range(start, prev + 1, 10):
+                        seg = slice(c0, min(c0 + 10, prev + 1))
+                        side = np.mean([M[(t + k) % nT, seg].mean() for k in far])
+                        if side < 0.15:
+                            S[t, seg] = True
                 if i is not None:
                     start = i
             if i is not None:
@@ -1695,14 +1699,14 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         dist_km = np.hypot(xx - (site_x - l), yy - (site_y - t)) / km_per_px
         dbz[dist_km < mask_within_km] = np.nan
 
-    if cfg.get("radial_spoke_filter"):
-        site_x, site_y = cfg["site_px"]
-        spoke = radial_spoke_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
-        dbz[spoke] = np.nan
     if cfg.get("radial_blob_filter"):
         site_x, site_y = cfg["site_px"]
         streak = radial_blob_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
         dbz[ndimage.binary_dilation(streak, iterations=2) & ~np.isnan(dbz)] = np.nan
+    if cfg.get("radial_spoke_filter"):
+        site_x, site_y = cfg["site_px"]
+        spoke = radial_spoke_mask(dbz, (site_x - l, site_y - t), cfg["km_per_px"])
+        dbz[spoke] = np.nan
 
     max_range_km = cfg.get("max_range_km")
     if max_range_km is not None:
