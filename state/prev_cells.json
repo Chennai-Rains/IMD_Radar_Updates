@@ -133,45 +133,45 @@
   ],
   "cni_ppi": [
     {
-      "id": 2,
+      "id": 3,
       "product": "cni_ppi",
       "centroid_latlon": [
-        14.010129063882063,
-        81.09356326447781
+        13.000301054054054,
+        80.58036356426038
       ],
-      "max_dbz": 42.2,
-      "pixel_count": 11,
-      "px": 607.3636363636364,
-      "py": 119.0909090909091,
-      "range_km": 134.7,
-      "beam_height_km": 1.55,
-      "elevated": true,
+      "max_dbz": 62.0,
+      "pixel_count": 5,
+      "px": 459.4,
+      "py": 418.0,
+      "range_km": 32.8,
+      "beam_height_km": 0.18,
+      "elevated": false,
       "velocity_kmh": [
-        10.4,
-        314.0
+        1.0,
+        325.0
       ],
-      "trend": "unknown",
+      "trend": "steady",
       "confirmed_at_surface": false
     },
     {
-      "id": 17,
+      "id": 4,
       "product": "cni_ppi",
       "centroid_latlon": [
-        12.977691906444907,
-        80.6363384904453
+        12.965841594594597,
+        80.72603710905052
       ],
-      "max_dbz": 62.0,
-      "pixel_count": 13,
-      "px": 475.53846153846155,
-      "py": 424.6923076923077,
-      "range_km": 39.3,
-      "beam_height_km": 0.29,
+      "max_dbz": 46.2,
+      "pixel_count": 5,
+      "px": 501.4,
+      "py": 428.2,
+      "range_km": 49.0,
+      "beam_height_km": 0.32,
       "elevated": false,
       "velocity_kmh": [
-        0.5,
-        39.0
+        1.1,
+        229.0
       ],
-      "trend": "steady",
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
@@ -198,5 +198,27 @@
       "confirmed_at_surface": false
     }
   ],
-  "tvm_ppi": []
+  "tvm_ppi": [
+    {
+      "id": 1,
+      "product": "tvm_ppi",
+      "centroid_latlon": [
+        8.195454579647748,
+        76.99350332121557
+      ],
+      "max_dbz": 41.2,
+      "pixel_count": 126,
+      "px": 388.05555555555554,
+      "py": 381.55555555555554,
+      "range_km": 40.5,
+      "beam_height_km": 1.54,
+      "elevated": true,
+      "velocity_kmh": [
+        18.7,
+        63.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ]
 }
