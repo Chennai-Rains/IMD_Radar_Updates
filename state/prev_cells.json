@@ -1,66 +1,45 @@
 {
   "maxz": [
     {
-      "id": 1,
+      "id": 11,
       "product": "maxz",
       "centroid_latlon": [
-        13.196044979561062,
-        80.91370400471055
+        13.178881282998427,
+        80.91733682327263
+      ],
+      "max_dbz": 39.0,
+      "pixel_count": 41,
+      "px": 1704.0975609756097,
+      "py": 625.0487804878048,
+      "range_km": 80.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        16.8,
+        153.0
+      ],
+      "trend": "steady",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 16,
+      "product": "maxz",
+      "centroid_latlon": [
+        12.618934763348829,
+        80.58481855519902
       ],
       "max_dbz": 40.9,
-      "pixel_count": 78,
-      "px": 1699.948717948718,
-      "py": 604.9358974358975,
-      "range_km": 81.0,
+      "pixel_count": 975,
+      "px": 1324.3466666666666,
+      "py": 1281.2092307692308,
+      "range_km": 54.4,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        15.0,
-        162.0
+        8.9,
+        142.0
       ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 3,
-      "product": "maxz",
-      "centroid_latlon": [
-        12.626394407082323,
-        80.56663572174303
-      ],
-      "max_dbz": 52.9,
-      "pixel_count": 1678,
-      "px": 1303.5810488676996,
-      "py": 1272.4678188319429,
-      "range_km": 52.3,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        9.0,
-        155.0
-      ],
-      "trend": "intensifying",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 46,
-      "product": "maxz",
-      "centroid_latlon": [
-        12.2748076559367,
-        80.51294749484735
-      ],
-      "max_dbz": 39.6,
-      "pixel_count": 15,
-      "px": 1242.2666666666667,
-      "py": 1684.4666666666667,
-      "range_km": 81.4,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        0.0,
-        252.0
-      ],
-      "trend": "unknown",
+      "trend": "weakening",
       "confirmed_at_surface": false
     }
   ],
