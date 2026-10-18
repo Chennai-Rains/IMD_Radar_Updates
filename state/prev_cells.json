@@ -193,71 +193,7 @@
     }
   ],
   "kkl_ppz": [],
-  "cni_maxz": [
-    {
-      "id": 1,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        14.651642167895169,
-        81.53767838966596
-      ],
-      "max_dbz": 40.2,
-      "pixel_count": 55,
-      "px": 374.8909090909091,
-      "py": 74.96363636363637,
-      "range_km": 220.3,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        23.3,
-        297.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 9,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        14.462575828828829,
-        81.37104719348248
-      ],
-      "max_dbz": 38.7,
-      "pixel_count": 40,
-      "px": 356.875,
-      "py": 95.95,
-      "range_km": 192.7,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        32.0,
-        308.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 17,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        13.40421032046332,
-        80.36008600565876
-      ],
-      "max_dbz": 40.2,
-      "pixel_count": 7,
-      "px": 247.57142857142858,
-      "py": 213.42857142857142,
-      "range_km": 36.4,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        19.8,
-        107.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    }
-  ],
+  "cni_maxz": [],
   "cni_ppi": [
     {
       "id": 5,
@@ -281,6 +217,28 @@
       "confirmed_at_surface": false
     }
   ],
-  "mlr_maxz": [],
+  "mlr_maxz": [
+    {
+      "id": 1,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        11.321928510496639,
+        73.92822681599691
+      ],
+      "max_dbz": 57.6,
+      "pixel_count": 5,
+      "px": 265.8,
+      "py": 746.0,
+      "range_km": 209.1,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        139.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "tvm_ppi": []
 }
