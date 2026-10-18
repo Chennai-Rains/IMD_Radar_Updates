@@ -470,90 +470,112 @@
   ],
   "cni_ppi": [
     {
-      "id": 6,
+      "id": 2,
       "product": "cni_ppi",
       "centroid_latlon": [
-        13.681693985446985,
-        81.30547631156931
-      ],
-      "max_dbz": 42.2,
-      "pixel_count": 13,
-      "px": 668.4615384615385,
-      "py": 216.30769230769232,
-      "range_km": 128.4,
-      "beam_height_km": 1.42,
-      "elevated": false,
-      "velocity_kmh": [
-        6.0,
-        214.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 13,
-      "product": "cni_ppi",
-      "centroid_latlon": [
-        13.575619019077902,
-        81.06945126954183
-      ],
-      "max_dbz": 42.2,
-      "pixel_count": 17,
-      "px": 600.4117647058823,
-      "py": 247.7058823529412,
-      "range_km": 100.5,
-      "beam_height_km": 0.95,
-      "elevated": false,
-      "velocity_kmh": [
-        10.5,
-        189.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 25,
-      "product": "cni_ppi",
-      "centroid_latlon": [
-        13.098949702702702,
-        81.00142947705858
-      ],
-      "max_dbz": 42.2,
-      "pixel_count": 20,
-      "px": 580.8,
-      "py": 388.8,
-      "range_km": 77.1,
-      "beam_height_km": 0.64,
-      "elevated": false,
-      "velocity_kmh": [
-        12.0,
-        168.0
-      ],
-      "trend": "weakening",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 30,
-      "product": "cni_ppi",
-      "centroid_latlon": [
-        12.623263711367859,
-        80.67362958186811
+        14.015841594594596,
+        80.72256869131743
       ],
       "max_dbz": 46.2,
-      "pixel_count": 131,
-      "px": 486.29007633587787,
-      "py": 529.6030534351145,
-      "range_km": 66.0,
-      "beam_height_km": 0.6,
+      "pixel_count": 5,
+      "px": 500.4,
+      "py": 117.4,
+      "range_km": 113.7,
+      "beam_height_km": 1.16,
       "elevated": false,
       "velocity_kmh": [
-        10.3,
-        150.0
+        17.1,
+        186.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 19,
+      "product": "cni_ppi",
+      "centroid_latlon": [
+        13.071247000000003,
+        81.01877156572408
+      ],
+      "max_dbz": 46.2,
+      "pixel_count": 5,
+      "px": 585.8,
+      "py": 397.0,
+      "range_km": 78.9,
+      "beam_height_km": 0.65,
+      "elevated": false,
+      "velocity_kmh": [
+        8.9,
+        156.0
+      ],
+      "trend": "intensifying",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 22,
+      "product": "cni_ppi",
+      "centroid_latlon": [
+        12.6205462992993,
+        80.62676328593427
+      ],
+      "max_dbz": 46.2,
+      "pixel_count": 54,
+      "px": 472.77777777777777,
+      "py": 530.4074074074074,
+      "range_km": 63.1,
+      "beam_height_km": 0.57,
+      "elevated": false,
+      "velocity_kmh": [
+        10.8,
+        144.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
-  "mlr_maxz": [],
+  "mlr_maxz": [
+    {
+      "id": 1,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        13.299243998204739,
+        75.14008847657604
+      ],
+      "max_dbz": 55.0,
+      "pixel_count": 7,
+      "px": 492.85714285714283,
+      "py": 365.85714285714283,
+      "range_km": 47.3,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        305.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 3,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        12.232192122838773,
+        75.54114499693883
+      ],
+      "max_dbz": 55.0,
+      "pixel_count": 9,
+      "px": 568.0,
+      "py": 571.0,
+      "range_km": 106.6,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        319.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "tvm_ppi": []
 }
