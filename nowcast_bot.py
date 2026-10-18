@@ -2058,9 +2058,18 @@ def fetch_frame(url: str) -> bytes | None:
     # to "you forgot to re-run this cell" from the outside — a fresh query
     # string plus explicit no-cache headers rules that out.
     bust_url = f"{url}{'&' if '?' in url else '?'}_={int(time.time())}"
+    hdr = {"Cache-Control": "no-cache", "Pragma": "no-cache"}
     try:
-        r = requests.get(bust_url, timeout=20,
-                          headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
+        try:
+            r = requests.get(bust_url, timeout=20, headers=hdr)
+        except requests.exceptions.SSLError as e:
+            # IMD's certificate failed verification (18 Oct 2026 ~16:15 UTC: every radar fetch stopped while browsers still
+            # loaded the same images). These are public radar pictures with nothing sensitive in the request, so retry once
+            # without verification rather than let the whole map freeze; the first failure is printed.
+            print(f"[fetch] {url} TLS verification failed ({str(e)[:120]}); retrying unverified")
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            r = requests.get(bust_url, timeout=20, headers=hdr, verify=False)
         r.raise_for_status()
         return r.content
     except requests.RequestException as e:
