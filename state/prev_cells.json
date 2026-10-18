@@ -281,45 +281,66 @@
   ],
   "cni_ppi": [
     {
-      "id": 9,
+      "id": 18,
       "product": "cni_ppi",
       "centroid_latlon": [
-        12.218018771771773,
-        79.56032117794341
+        12.575920423423424,
+        79.22802749012514
       ],
       "max_dbz": 46.2,
-      "pixel_count": 36,
-      "px": 165.30555555555554,
-      "py": 649.5555555555555,
-      "range_km": 124.6,
-      "beam_height_km": 1.36,
+      "pixel_count": 60,
+      "px": 69.5,
+      "py": 543.6166666666667,
+      "range_km": 128.2,
+      "beam_height_km": 1.42,
       "elevated": false,
       "velocity_kmh": [
-        13.6,
-        208.0
+        28.5,
+        233.0
       ],
-      "trend": "intensifying",
+      "trend": "unknown",
       "confirmed_at_surface": false
     },
     {
-      "id": 12,
+      "id": 19,
       "product": "cni_ppi",
       "centroid_latlon": [
-        12.170213613672496,
-        79.89253552287236
+        12.166404657657658,
+        79.54216703909438
       ],
-      "max_dbz": 46.2,
-      "pixel_count": 34,
-      "px": 261.0882352941176,
-      "py": 663.7058823529412,
-      "range_km": 110.4,
-      "beam_height_km": 1.11,
+      "max_dbz": 42.2,
+      "pixel_count": 42,
+      "px": 160.07142857142858,
+      "py": 664.8333333333334,
+      "range_km": 130.3,
+      "beam_height_km": 1.49,
       "elevated": false,
       "velocity_kmh": [
-        19.4,
-        183.0
+        11.3,
+        184.0
       ],
-      "trend": "intensifying",
+      "trend": "weakening",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 30,
+      "product": "cni_ppi",
+      "centroid_latlon": [
+        12.11453605176363,
+        79.87729765373886
+      ],
+      "max_dbz": 46.2,
+      "pixel_count": 59,
+      "px": 256.6949152542373,
+      "py": 680.1864406779661,
+      "range_km": 116.7,
+      "beam_height_km": 1.25,
+      "elevated": false,
+      "velocity_kmh": [
+        18.2,
+        187.0
+      ],
+      "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
