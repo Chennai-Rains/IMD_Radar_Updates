@@ -1218,6 +1218,40 @@ def extract_kkl_time_via_templates(img: Image.Image) -> tuple[int, int, int] | N
     return h, m, s
 
 
+# 23 Oct 2026: the DATE line ("22 OCT 2026 UTC") is in a different, plain font, also fully deterministic: one bitmap per
+# digit (assets/kkl_date_templates.npz, built from 785 archived frames 12-23 Oct; on a held-out half every day and year
+# read exactly). Reading the day matters: with only HH:MM:SS a frame IMD keeps re-serving from YESTERDAY at the same clock
+# time was taken as fresh (seen 23 Oct when Karaikal went off air for maintenance).
+_KKL_DATE_TEMPLATES: dict | None = None
+
+
+def extract_kkl_day_via_templates(img: Image.Image) -> int | None:
+    """Day of month from Karaikal's date line, or None (unreadable / not an exact template match)."""
+    global _KKL_DATE_TEMPLATES
+    if _KKL_DATE_TEMPLATES is None:
+        data = np.load(Path(__file__).parent / "assets" / "kkl_date_templates.npz")
+        _KKL_DATE_TEMPLATES = {str(c): im for c, im in zip(data["chars"], data["images"])}
+    crop = img.convert("RGB").crop(PRODUCTS["kkl_maxz"]["timestamp_bbox"])
+    arr = np.array(crop)
+    big = cv2.resize(arr, (arr.shape[1] * 5, arr.shape[0] * 5), interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(big, cv2.COLOR_RGB2GRAY)
+    _, bw_full = cv2.threshold(gray, 140, 255, cv2.THRESH_BINARY)
+    bw = bw_full[int(bw_full.shape[0] * 0.5):, :]      # bottom line only ("DD MON YYYY UTC")
+    groups = _kkl_char_groups(bw)
+    if len(groups) != 12:                               # "DD MON YYYY UTC" -> 2 + 3 + 4 + 3 glyphs
+        return None
+    digits = []
+    for box in (groups[0], groups[1]):
+        g = _kkl_crop_glyph(bw, box).astype(int)
+        scores = {c: np.abs(g - t.astype(int)).mean() / 255.0 for c, t in _KKL_DATE_TEMPLATES.items()}
+        c = min(scores, key=scores.get)
+        if scores[c] > 0.05:
+            return None
+        digits.append(c)
+    day = int("".join(digits))
+    return day if 1 <= day <= 31 else None
+
+
 # === CELL 8 (OCR) ===
 def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
     """Two IMD timestamp layouts are in play here: NIOT prints
@@ -1288,6 +1322,19 @@ def extract_observation_time(img: Image.Image, product: str) -> datetime | None:
         # capped well under 24h so this never drifts onto the wrong day.
         candidates = [dt + timedelta(days=d) for d in (-1, 0, 1)]
         dt = min(candidates, key=lambda c: abs((c - now_utc).total_seconds()))
+        # 23 Oct 2026: the printed DAY decides when it can be read -- the latest date up to tomorrow with that day of the
+        # month, so a frame from yesterday (or last week) gets its real date and is treated as stale
+        try:
+            day = extract_kkl_day_via_templates(img)
+        except Exception:
+            day = None
+        if day is not None and dt.day != day:
+            base = now_utc.replace(hour=h, minute=m, second=s, microsecond=0)
+            for back in range(-1, 40):
+                cand = base - timedelta(days=back)
+                if cand.day == day:
+                    print(f"[time] Karaikal frame printed day {day}: dated {cand:%d %b %H:%M} UTC, not {dt:%d %b}")
+                    return cand
         return dt
 
     if pytesseract is None:
