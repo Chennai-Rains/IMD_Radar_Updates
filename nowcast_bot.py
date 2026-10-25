@@ -1729,7 +1729,7 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         dbz[static_mask] = np.nan
 
     mask_within_km = cfg.get("mask_within_km")
-    if mask_within_km is not None:
+    if mask_within_km is not None and product not in INNER_DISC_RELEASED:
         # See PRODUCTS[...]["mask_within_km"]'s comment -- cedes this
         # product's inner disc to a higher-resolution product covering the
         # same ground (e.g. kkl_ppz ceding 0-250km to kkl_maxz). site_px is
@@ -3616,6 +3616,14 @@ def sample_cell_velocity_from_flow(flow: np.ndarray, cell: Cell, dt_minutes: flo
 NON_RADAR_ECHO_FRACTION = 0.30
 
 
+# 25 Oct 2026: a long-range product hands its inner disc to the sharper product of the same radar (mask_within_km). When
+# that sharper product is off air or stale (Karaikal MAXZ frozen at 22:52 UTC on 24 Oct while the 500 km PPI kept
+# updating), the inner disc is released so the long-range picture covers it: otherwise storms there vanished from the
+# map and from the alerts.
+INNER_DISC_PARTNER = {"kkl_ppz": "kkl_maxz", "cni_ppz": "cni_maxz"}
+INNER_DISC_RELEASED: set = set()
+
+
 def looks_like_non_radar(obs_time, dbz) -> bool:
     try:
         return obs_time is None and float(np.isfinite(dbz).mean()) > NON_RADAR_ECHO_FRACTION
@@ -4285,7 +4293,7 @@ def _bot_pixel_index(product: str, lat2d: np.ndarray, lon2d: np.ndarray, shape: 
     site = site_for(product)
     dist = _haversine_km((site["site_lat"], site["site_lon"]), (lat2d, lon2d))
     cover = inside & (dist <= cfg["range_km"])
-    if cfg.get("mask_within_km") is not None:
+    if cfg.get("mask_within_km") is not None and product not in INNER_DISC_RELEASED:
         cover &= dist >= cfg["mask_within_km"]
     return x, y, cover
 
@@ -4666,7 +4674,15 @@ def run_pipeline() -> None:
 
     _last_dbz = {}
     last_obs_time_seen: dict[str, "datetime | None"] = {p: None for p in POLLED_PRODUCTS}
+    INNER_DISC_RELEASED.clear()
     for product in POLLED_PRODUCTS:
+        partner = INNER_DISC_PARTNER.get(product)
+        if partner and partner in POLLED_PRODUCTS:
+            pt = last_obs_time_seen.get(partner)
+            if partner not in _last_dbz or pt is None or \
+                    (datetime.now(timezone.utc) - pt).total_seconds() / 60.0 > STALE_OBS_MINUTES:
+                INNER_DISC_RELEASED.add(product)
+                print(f"[poll] {product}: {partner} is missing or stale ({pt}) -- using {product} for its inner disc too")
         dbz = poll_and_decode(product, state, prev_cells, prev_obs_time, last_obs_time_seen)
         if isinstance(dbz, str) and dbz == "NON_RADAR":
             last_obs_time_seen[product] = None
