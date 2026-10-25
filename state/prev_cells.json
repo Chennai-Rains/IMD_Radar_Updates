@@ -1,45 +1,45 @@
 {
   "maxz": [
     {
-      "id": 8,
+      "id": 2,
       "product": "maxz",
       "centroid_latlon": [
-        12.845705586716194,
-        80.28244554227611
+        12.855934286563901,
+        80.33478474880435
       ],
-      "max_dbz": 40.9,
-      "pixel_count": 3693,
-      "px": 979.0230165177362,
-      "py": 1015.4730571351205,
-      "range_km": 13.5,
+      "max_dbz": 39.3,
+      "pixel_count": 3823,
+      "px": 1038.7967564739733,
+      "py": 1003.4867904786817,
+      "range_km": 16.6,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        2.4,
-        21.0
+        3.4,
+        29.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
     },
     {
-      "id": 92,
+      "id": 102,
       "product": "maxz",
       "centroid_latlon": [
-        12.748929787997369,
-        80.58467583475655
+        12.765335724574575,
+        79.80820690395922
       ],
-      "max_dbz": 39.3,
-      "pixel_count": 98,
-      "px": 1324.1836734693877,
-      "py": 1128.8775510204082,
-      "range_km": 46.0,
+      "max_dbz": 37.5,
+      "pixel_count": 95,
+      "px": 437.42105263157896,
+      "py": 1109.6526315789474,
+      "range_km": 48.1,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        11.6,
-        61.0
+        3.1,
+        306.0
       ],
-      "trend": "steady",
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
@@ -557,28 +557,6 @@
       "confirmed_at_surface": false
     }
   ],
-  "mlr_maxz": [
-    {
-      "id": 2,
-      "product": "mlr_maxz",
-      "centroid_latlon": [
-        11.32387907538023,
-        73.92795995329325
-      ],
-      "max_dbz": 57.6,
-      "pixel_count": 8,
-      "px": 265.75,
-      "py": 745.625,
-      "range_km": 208.9,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        0.0,
-        291.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    }
-  ],
+  "mlr_maxz": [],
   "tvm_ppi": []
 }
