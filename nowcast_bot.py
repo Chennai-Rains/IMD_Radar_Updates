@@ -3624,9 +3624,17 @@ INNER_DISC_PARTNER = {"kkl_ppz": "kkl_maxz", "cni_ppz": "cni_maxz"}
 INNER_DISC_RELEASED: set = set()
 
 
-def looks_like_non_radar(obs_time, dbz) -> bool:
+def looks_like_non_radar(obs_time, dbz, img=None, product=None) -> bool:
+    """Not a radar picture: no readable time AND either the wrong image size (25 Oct 2026: the Chennai DWR maintenance
+    photo is 748x599, a real caz_cni frame 919x700, and it decoded as only 2-19 % "echo") or > 30 % decoded echo
+    (23 Oct: Karaikal's maintenance photo has the real frame's size)."""
+    if obs_time is not None:
+        return False
     try:
-        return obs_time is None and float(np.isfinite(dbz).mean()) > NON_RADAR_ECHO_FRACTION
+        want = PRODUCTS[product].get("image_size") if product else None
+        if img is not None and want and (abs(img.size[0] - want[0]) > 0.03 * want[0] or abs(img.size[1] - want[1]) > 0.03 * want[1]):
+            return True
+        return float(np.isfinite(dbz).mean()) > NON_RADAR_ECHO_FRACTION
     except Exception:
         return False
 
@@ -3666,9 +3674,9 @@ def poll_and_decode(product: str, state: dict, prev_cells: dict, prev_obs_time: 
     last_obs_time_seen[product] = obs_time
     lut = build_lut_from_colorbar(img, product)
     dbz = decode_reflectivity(img, product, lut)
-    if looks_like_non_radar(obs_time, dbz):
-        print(f"[poll] {product}: frame has no readable time and {np.isfinite(dbz).mean():.0%} of it decodes as echo -- "
-              f"not a radar picture (e.g. IMD's 'radar under maintenance' photo); product left out this cycle")
+    if looks_like_non_radar(obs_time, dbz, img, product):
+        print(f"[poll] {product}: frame has no readable time and is {img.size[0]}x{img.size[1]} with "
+              f"{np.isfinite(dbz).mean():.0%} decoded echo -- not a radar picture (e.g. IMD's 'radar under maintenance' photo); product left out this cycle")
         state.setdefault(product, {})["non_radar_since"] = state.get(product, {}).get("non_radar_since") or time.time()
         return "NON_RADAR"
     (state.get(product) or {}).pop("non_radar_since", None)
@@ -4716,7 +4724,7 @@ def run_pipeline() -> None:
                 img = Image.open(existing[-1])
                 lut = build_lut_from_colorbar(img, product)
                 fb = decode_reflectivity(img, product, lut)
-                if looks_like_non_radar(_obs_time_from_archive_filename(existing[-1]), fb):
+                if looks_like_non_radar(_obs_time_from_archive_filename(existing[-1]), fb, img, product):
                     print(f"[poll] {product}: archived frame {existing[-1]} is not a radar picture -- not using it")
                 else:
                     _last_dbz[product] = fb
