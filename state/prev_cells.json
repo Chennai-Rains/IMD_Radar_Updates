@@ -1,75 +1,52 @@
 {
-  "maxz": [
-    {
-      "id": 2,
-      "product": "maxz",
-      "centroid_latlon": [
-        12.86381667063483,
-        80.20345522213717
-      ],
-      "max_dbz": 45.7,
-      "pixel_count": 16,
-      "px": 888.8125,
-      "py": 994.25,
-      "range_km": 9.1,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        0.0,
-        291.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    }
-  ],
+  "maxz": [],
   "kkl_maxz": [],
   "kkl_ppz": [],
   "cni_maxz": [],
   "cni_ppi": [
     {
-      "id": 10,
+      "id": 7,
       "product": "cni_ppi",
       "centroid_latlon": [
-        12.063190866943868,
-        80.05150990037201
+        12.844219972972974,
+        80.62129089351095
       ],
-      "max_dbz": 58.0,
-      "pixel_count": 13,
-      "px": 306.9230769230769,
-      "py": 695.3846153846154,
-      "range_km": 116.4,
-      "beam_height_km": 1.21,
+      "max_dbz": 62.0,
+      "pixel_count": 5,
+      "px": 471.2,
+      "py": 464.2,
+      "range_km": 44.7,
+      "beam_height_km": 0.28,
       "elevated": false,
       "velocity_kmh": [
-        5.4,
-        207.0
+        2.1,
+        264.0
       ],
-      "trend": "weakening",
+      "trend": "unknown",
       "confirmed_at_surface": false
-    }
-  ],
-  "mlr_maxz": [
+    },
     {
-      "id": 1,
-      "product": "mlr_maxz",
+      "id": 8,
+      "product": "cni_ppi",
       "centroid_latlon": [
-        12.232192122838773,
-        75.54114499693883
+        12.09489564864865,
+        80.28589489872029
       ],
-      "max_dbz": 55.0,
-      "pixel_count": 9,
-      "px": 568.0,
-      "py": 571.0,
-      "range_km": 106.6,
-      "beam_height_km": 0.0,
+      "max_dbz": 46.2,
+      "pixel_count": 6,
+      "px": 374.5,
+      "py": 686.0,
+      "range_km": 110.0,
+      "beam_height_km": 1.1,
       "elevated": false,
       "velocity_kmh": [
-        0.0,
-        178.0
+        4.4,
+        223.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
+  "mlr_maxz": [],
   "tvm_ppi": []
 }
