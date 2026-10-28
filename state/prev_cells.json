@@ -7,63 +7,42 @@
       "id": 1,
       "product": "cni_maxz",
       "centroid_latlon": [
-        14.532195448448451,
-        81.82129919920513
+        14.500124916377917,
+        81.70825447308931
       ],
-      "max_dbz": 40.2,
-      "pixel_count": 9,
-      "px": 405.55555555555554,
-      "py": 88.22222222222223,
-      "range_km": 230.8,
+      "max_dbz": 48.3,
+      "pixel_count": 78,
+      "px": 393.3333333333333,
+      "py": 91.78205128205128,
+      "range_km": 219.7,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        26.4,
+        19.9,
+        65.0
+      ],
+      "trend": "steady",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 5,
+      "product": "cni_maxz",
+      "centroid_latlon": [
+        14.47238178863479,
+        81.44029104084122
+      ],
+      "max_dbz": 44.4,
+      "pixel_count": 130,
+      "px": 364.3615384615385,
+      "py": 94.86153846153846,
+      "range_km": 198.2,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        21.9,
         68.0
       ],
       "trend": "weakening",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 2,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        14.462525778778778,
-        81.62645119855459
-      ],
-      "max_dbz": 47.6,
-      "pixel_count": 45,
-      "px": 384.4888888888889,
-      "py": 95.95555555555555,
-      "range_km": 210.6,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        26.2,
-        70.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 3,
-      "product": "cni_maxz",
-      "centroid_latlon": [
-        14.448388869592367,
-        81.37806415741116
-      ],
-      "max_dbz": 47.6,
-      "pixel_count": 101,
-      "px": 357.63366336633663,
-      "py": 97.52475247524752,
-      "range_km": 191.9,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        22.5,
-        69.0
-      ],
-      "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
