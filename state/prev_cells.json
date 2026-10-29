@@ -1,6 +1,50 @@
 {
-  "maxz": [],
-  "kkl_maxz": [],
+  "maxz": [
+    {
+      "id": 1,
+      "product": "maxz",
+      "centroid_latlon": [
+        13.008438890657258,
+        80.25883223800776
+      ],
+      "max_dbz": 43.2,
+      "pixel_count": 18,
+      "px": 952.0555555555555,
+      "py": 824.7777777777778,
+      "range_km": 8.7,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.5,
+        3.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
+  "kkl_maxz": [
+    {
+      "id": 1,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        11.042220307003767,
+        78.70199201604271
+      ],
+      "max_dbz": 36.6,
+      "pixel_count": 5,
+      "px": 130.6,
+      "py": 248.0,
+      "range_km": 124.7,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        2.5,
+        294.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "kkl_ppz": [],
   "cni_maxz": [
     {
