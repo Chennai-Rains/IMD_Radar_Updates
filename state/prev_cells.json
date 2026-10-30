@@ -46,7 +46,29 @@
     }
   ],
   "cni_maxz": [],
-  "cni_ppi": [],
+  "cni_ppi": [
+    {
+      "id": 1,
+      "product": "cni_ppi",
+      "centroid_latlon": [
+        12.172598351351352,
+        80.36566850658156
+      ],
+      "max_dbz": 46.2,
+      "pixel_count": 6,
+      "px": 397.5,
+      "py": 663.0,
+      "range_km": 101.6,
+      "beam_height_km": 0.97,
+      "elevated": false,
+      "velocity_kmh": [
+        0.1,
+        331.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "mlr_maxz": [],
   "tvm_ppi": []
 }
