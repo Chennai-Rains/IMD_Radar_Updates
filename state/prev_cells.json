@@ -5,42 +5,84 @@
       "id": 1,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        12.29803860729426,
-        78.65484195619653
+        12.384451982536758,
+        78.79560667276739
       ],
-      "max_dbz": 38.2,
-      "pixel_count": 8,
-      "px": 125.25,
-      "py": 102.875,
-      "range_km": 199.8,
+      "max_dbz": 37.7,
+      "pixel_count": 9,
+      "px": 141.22222222222223,
+      "py": 92.88888888888889,
+      "range_km": 198.0,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        26.9,
-        230.0
+        22.2,
+        219.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     },
     {
-      "id": 5,
+      "id": 2,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        11.754175178021168,
-        78.67037503665988
+        12.264340441812404,
+        78.63433456136768
       ],
-      "max_dbz": 48.5,
-      "pixel_count": 80,
-      "px": 127.0125,
-      "py": 165.725,
-      "range_km": 157.2,
+      "max_dbz": 42.4,
+      "pixel_count": 13,
+      "px": 122.92307692307692,
+      "py": 106.76923076923077,
+      "range_km": 198.4,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        14.4,
-        245.0
+        22.7,
+        203.0
       ],
-      "trend": "steady",
+      "trend": "intensifying",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 3,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        11.826101497478318,
+        78.64248446387602
+      ],
+      "max_dbz": 44.9,
+      "pixel_count": 46,
+      "px": 123.84782608695652,
+      "py": 157.41304347826087,
+      "range_km": 164.4,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        26.6,
+        227.0
+      ],
+      "trend": "weakening",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 4,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        11.676360814104727,
+        78.6553209287671
+      ],
+      "max_dbz": 46.4,
+      "pixel_count": 46,
+      "px": 125.30434782608695,
+      "py": 174.7173913043478,
+      "range_km": 153.6,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        6.8,
+        230.0
+      ],
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
@@ -50,25 +92,69 @@
       "id": 1,
       "product": "cni_maxz",
       "centroid_latlon": [
-        11.726269522522523,
-        78.79096061018491
+        11.72400795060578,
+        78.77926207570673
       ],
-      "max_dbz": 39.8,
-      "pixel_count": 25,
-      "px": 77.92,
-      "py": 399.68,
-      "range_km": 222.0,
+      "max_dbz": 43.3,
+      "pixel_count": 29,
+      "px": 76.65517241379311,
+      "py": 399.9310344827586,
+      "range_km": 223.1,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        0.0,
-        91.0
+        9.5,
+        241.0
+      ],
+      "trend": "intensifying",
+      "confirmed_at_surface": false
+    }
+  ],
+  "cni_ppi": [
+    {
+      "id": 1,
+      "product": "cni_ppi",
+      "centroid_latlon": [
+        13.07800375675676,
+        80.64834455182913
+      ],
+      "max_dbz": 62.0,
+      "pixel_count": 11,
+      "px": 479.0,
+      "py": 395.0,
+      "range_km": 38.8,
+      "beam_height_km": 0.28,
+      "elevated": false,
+      "velocity_kmh": [
+        2.5,
+        200.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
-  "cni_ppi": [],
-  "mlr_maxz": [],
+  "mlr_maxz": [
+    {
+      "id": 1,
+      "product": "mlr_maxz",
+      "centroid_latlon": [
+        12.232192122838773,
+        75.54114499693883
+      ],
+      "max_dbz": 47.6,
+      "pixel_count": 9,
+      "px": 568.0,
+      "py": 571.0,
+      "range_km": 106.6,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        214.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "tvm_ppi": []
 }
