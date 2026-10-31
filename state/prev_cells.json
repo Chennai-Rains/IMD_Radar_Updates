@@ -7,90 +7,25 @@
       "id": 1,
       "product": "cni_maxz",
       "centroid_latlon": [
-        13.865451781704783,
-        79.66823195410699
+        13.852891144144145,
+        79.65071199786544
       ],
-      "max_dbz": 43.3,
-      "pixel_count": 13,
-      "px": 172.76923076923077,
-      "py": 162.23076923076923,
-      "range_km": 109.9,
+      "max_dbz": 37.3,
+      "pixel_count": 8,
+      "px": 170.875,
+      "py": 163.625,
+      "range_km": 110.0,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        39.7,
-        185.0
+        10.0,
+        238.0
       ],
-      "trend": "unknown",
+      "trend": "weakening",
       "confirmed_at_surface": false
     }
   ],
-  "cni_ppi": [
-    {
-      "id": 3,
-      "product": "cni_ppi",
-      "centroid_latlon": [
-        13.133747000000001,
-        80.62926825429707
-      ],
-      "max_dbz": 62.0,
-      "pixel_count": 6,
-      "px": 473.5,
-      "py": 378.5,
-      "range_km": 37.2,
-      "beam_height_km": 0.22,
-      "elevated": false,
-      "velocity_kmh": [
-        19.8,
-        324.0
-      ],
-      "trend": "steady",
-      "confirmed_at_surface": false
-    }
-  ],
-  "mlr_maxz": [
-    {
-      "id": 1,
-      "product": "mlr_maxz",
-      "centroid_latlon": [
-        13.192390196200819,
-        75.20276308869357
-      ],
-      "max_dbz": 57.6,
-      "pixel_count": 5,
-      "px": 504.6,
-      "py": 386.4,
-      "range_km": 43.3,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        0.0,
-        166.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    },
-    {
-      "id": 3,
-      "product": "mlr_maxz",
-      "centroid_latlon": [
-        11.32713001685288,
-        73.93539398575244
-      ],
-      "max_dbz": 57.6,
-      "pixel_count": 7,
-      "px": 267.14285714285717,
-      "py": 745.0,
-      "range_km": 208.2,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        6.9,
-        57.0
-      ],
-      "trend": "intensifying",
-      "confirmed_at_surface": false
-    }
-  ],
+  "cni_ppi": [],
+  "mlr_maxz": [],
   "tvm_ppi": []
 }
