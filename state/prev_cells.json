@@ -1,49 +1,70 @@
 {
-  "maxz": [],
-  "kkl_maxz": [
+  "maxz": [
     {
       "id": 1,
-      "product": "kkl_maxz",
+      "product": "maxz",
       "centroid_latlon": [
-        11.947361352381101,
-        79.52866035502791
+        12.73568680197336,
+        79.79848380291217
       ],
-      "max_dbz": 38.4,
-      "pixel_count": 5,
-      "px": 224.4,
-      "py": 143.4,
-      "range_km": 118.5,
+      "max_dbz": 44.0,
+      "pixel_count": 101,
+      "px": 426.3168316831683,
+      "py": 1144.3960396039604,
+      "range_km": 50.5,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        16.7,
-        222.0
+        0.0,
+        176.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 8,
+      "product": "maxz",
+      "centroid_latlon": [
+        12.436598227814608,
+        79.80340586850072
+      ],
+      "max_dbz": 44.0,
+      "pixel_count": 113,
+      "px": 431.9380530973451,
+      "py": 1494.8761061946902,
+      "range_km": 71.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        358.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
+  "kkl_maxz": [],
   "kkl_ppz": [],
   "cni_maxz": [
     {
-      "id": 2,
+      "id": 1,
       "product": "cni_maxz",
       "centroid_latlon": [
-        14.498944806502156,
-        79.84958470353767
+        14.463992109974841,
+        79.81851883900045
       ],
-      "max_dbz": 45.4,
-      "pixel_count": 69,
-      "px": 192.3768115942029,
-      "py": 91.91304347826087,
-      "range_km": 164.4,
+      "max_dbz": 44.8,
+      "pixel_count": 111,
+      "px": 189.018018018018,
+      "py": 95.7927927927928,
+      "range_km": 161.7,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        8.4,
-        227.0
+        26.9,
+        233.0
       ],
-      "trend": "weakening",
+      "trend": "steady",
       "confirmed_at_surface": false
     }
   ],
