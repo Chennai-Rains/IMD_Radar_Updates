@@ -4253,6 +4253,13 @@ BOT_NO_COVERAGE = 255
 # from: its echo, coverage, cells and motion are all kept out of the grid,
 # and it is listed in "radars" with status "excluded".
 BOT_EXCLUDED_PRODUCTS: tuple = ()
+BOT_NIOT_REFERENCES: tuple = ("cni_ppi", "cni_maxz")   # Chennai DWR products NIOT is checked against (1 Nov 2026)
+BOT_NIOT_CHECK_KM: float = 6.0       # neighbourhood for the check (frames differ by up to ~10 min)
+BOT_NIOT_MARGIN_DB: float = 5.0      # NIOT may read this much above the Chennai DWR
+BOT_NIOT_MIN_DBZ: float = 20.0       # a capped value below this counts as no echo
+BOT_LONG_RANGE_PRODUCTS: tuple = ("kkl_ppz",)
+BOT_LONG_RANGE_MIN_CORE_DBZ: float = 45.0   # a far patch needs a core this strong to count
+BOT_LONG_RANGE_FAR_KM: float = 250.0        # ...beyond this distance from the radar
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 
@@ -4463,6 +4470,49 @@ def export_bot_data(products: tuple | None = None, now_utc: datetime | None = No
             entry["motion"] = note
             w_sum += w; u_sum += w * u; v_sum += w * v
         radars.append(entry)
+
+    # ---- NIOT is held to what the Chennai DWR sees (ported from the test repo, 1 Nov 2026) ----
+    # 1 Nov 2026: from ~10:30 AM IST NIOT showed 50-59 dBZ bands 30-60 km off Chennai while Chennai PPI, Chennai
+    # MAXZ, Karaikal MAXZ and Karaikal Extended all read <= 36 dBZ there (same on 28 Oct). Normally NIOT reads about
+    # the same as the Chennai PPI. Wherever a fresh Chennai DWR product looks, a NIOT node may not exceed the strongest
+    # Chennai reading within BOT_NIOT_CHECK_KM by more than BOT_NIOT_MARGIN_DB (no echo when that is below
+    # BOT_NIOT_MIN_DBZ). When the Chennai DWR is missing or stale, NIOT is used as it is.
+    refs = [regridded[q] for q in BOT_NIOT_REFERENCES if q in regridded]
+    if "maxz" in regridded and refs:
+        ref = np.full(lat2d.shape, np.nan)
+        for r_ in refs:
+            ref = np.fmax(ref, r_)
+        seen = np.isfinite(ref)
+        rad = max(1, int(round(BOT_NIOT_CHECK_KM / (step * 111.0))))
+        ref_near = ndimage.maximum_filter(np.where(seen, ref, -1.0), size=2 * rad + 1)
+        cap = ref_near + BOT_NIOT_MARGIN_DB
+        niot = regridded["maxz"]
+        over = seen & np.isfinite(niot) & (niot > cap)
+        if over.any():
+            regridded["maxz"] = np.where(over, np.where(cap < BOT_NIOT_MIN_DBZ, -1.0, cap), niot)
+            print(f"[bot-export] maxz: {int(over.sum())} NIOT nodes held to the Chennai DWR")
+
+    # ---- weak far echo of the long-range products (ported from the test repo, 31 Oct 2026) ----
+    # Beyond 250 km the beam is 6-10 km up. Weak patches there fed two false Thoothukudi alerts on 31 Oct (Karaikal
+    # Extended echo 265-310 km out, 25-44 dBZ, nothing on Trivandrum or on the ground). A far patch now counts only
+    # if it holds a core >= BOT_LONG_RANGE_MIN_CORE_DBZ; otherwise the whole patch is dropped.
+    for p in BOT_LONG_RANGE_PRODUCTS:
+        if p not in regridded:
+            continue
+        vals = regridded[p]
+        site = site_for(p)
+        far_ring = np.hypot((lat2d - site["site_lat"]) * 111.0,
+                            (lon2d - site["site_lon"]) * 111.0 * np.cos(np.radians(site["site_lat"]))) >= BOT_LONG_RANGE_FAR_KM
+        echo = np.isfinite(vals) & (vals > 0) & far_ring
+        if echo.any():
+            lab, n = ndimage.label(echo, structure=np.ones((3, 3)))
+            peaks = ndimage.maximum(np.where(echo, vals, 0), lab, index=np.arange(1, n + 1))
+            weak_ids = np.flatnonzero(np.asarray(peaks) < BOT_LONG_RANGE_MIN_CORE_DBZ) + 1
+            if weak_ids.size:
+                drop = np.isin(lab, weak_ids)
+                regridded[p] = np.where(drop, np.nan, vals)
+                print(f"[bot-export] {p}: {weak_ids.size}/{n} far patches without a "
+                      f"{BOT_LONG_RANGE_MIN_CORE_DBZ:.0f} dBZ core dropped ({int(drop.sum())} nodes)")
 
     if not regridded:
         print("[bot-export] no usable radar this cycle -- writing an index that says so, no grid")
