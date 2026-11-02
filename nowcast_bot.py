@@ -4256,6 +4256,8 @@ BOT_EXCLUDED_PRODUCTS: tuple = ()
 BOT_NIOT_REFERENCES: tuple = ("cni_ppi", "cni_maxz")   # Chennai DWR products NIOT is checked against (1 Nov 2026)
 BOT_NIOT_CHECK_KM: float = 6.0       # neighbourhood for the check (frames differ by up to ~10 min)
 BOT_NIOT_MARGIN_DB: float = 5.0      # NIOT may read this much above the Chennai DWR
+BOT_NIOT_REF_MAX_AGE_MIN: float = 90.0   # a late Chennai frame still serves as NIOT's reference up to this age (2 Nov 2026)
+BOT_NIOT_MOTION_KM_PER_MIN: float = 0.5  # neighbourhood widened by this per minute between the Chennai and NIOT frames
 BOT_NIOT_MIN_DBZ: float = 20.0       # a capped value below this counts as no echo
 BOT_LONG_RANGE_PRODUCTS: tuple = ("kkl_ppz",)
 BOT_LONG_RANGE_MIN_CORE_DBZ: float = 45.0   # a far patch needs a core this strong to count
@@ -4477,20 +4479,41 @@ def export_bot_data(products: tuple | None = None, now_utc: datetime | None = No
     # the same as the Chennai PPI. Wherever a fresh Chennai DWR product looks, a NIOT node may not exceed the strongest
     # Chennai reading within BOT_NIOT_CHECK_KM by more than BOT_NIOT_MARGIN_DB (no echo when that is below
     # BOT_NIOT_MIN_DBZ). When the Chennai DWR is missing or stale, NIOT is used as it is.
-    refs = [regridded[q] for q in BOT_NIOT_REFERENCES if q in regridded]
-    if "maxz" in regridded and refs:
-        ref = np.full(lat2d.shape, np.nan)
-        for r_ in refs:                      # in order of trust: the PPI wherever it looks, MAXZ only beyond it (2 Nov 2026:
-            ref = np.where(np.isfinite(ref), ref, r_)   # both column-max products read the bright band in stratiform rain)
-        seen = np.isfinite(ref)
-        rad = max(1, int(round(BOT_NIOT_CHECK_KM / (step * 111.0))))
-        ref_near = ndimage.maximum_filter(np.where(seen, ref, -1.0), size=2 * rad + 1)
+    # 2 Nov 2026 (5:51 PM post): IMD's Chennai images lagged -- at 12:21 UTC the newest Chennai PPI and MAXZ were from
+    # 11:39 (42 min, just past BOT_STALE_MINUTES) while NIOT's 11:43 frame was still "fresh", so NIOT ran unchecked
+    # and 757 nodes up to 59 dBZ over Tiruvallur / Kancheepuram / Chennai went out; the PPI before and after showed
+    # nothing over that land. A Chennai frame that is only LATE (up to BOT_NIOT_REF_MAX_AGE_MIN) still serves as the
+    # reference, with the neighbourhood widened for the time between it and the NIOT frame (storm motion).
+    if "maxz" in regridded:
+        niot_age = age_h.get("maxz", 0.0) * 60.0
+        ref_near = np.full(lat2d.shape, np.nan)
+        used_refs = []
+        for q in BOT_NIOT_REFERENCES:                 # in order of trust: the first that looks at a node decides it
+            if q in regridded:
+                g, q_age = regridded[q], age_h.get(q, 0.0) * 60.0
+            else:
+                obs_q = _last_obs_time_seen.get(q)
+                q_age = (now_utc - obs_q).total_seconds() / 60.0 if obs_q is not None else None
+                if q not in _last_dbz or q_age is None or q_age > BOT_NIOT_REF_MAX_AGE_MIN:
+                    continue
+                g = _bot_regrid_dbz(_last_dbz[q], q, lat2d, lon2d)
+            seen_q = np.isfinite(g)
+            radius_km = BOT_NIOT_CHECK_KM + BOT_NIOT_MOTION_KM_PER_MIN * abs(q_age - niot_age)
+            rad = max(1, int(round(radius_km / (step * 111.0))))
+            near_q = ndimage.maximum_filter(np.where(seen_q, g, -1.0), size=2 * rad + 1)
+            ref_near = np.where(np.isfinite(ref_near), ref_near, np.where(seen_q, near_q, np.nan))
+            used_refs.append(f"{q} {q_age:.0f} min")
+        seen = np.isfinite(ref_near)
         cap = ref_near + BOT_NIOT_MARGIN_DB
         niot = regridded["maxz"]
         over = seen & np.isfinite(niot) & (niot > cap)
         if over.any():
-            regridded["maxz"] = np.where(over, np.where(cap < BOT_NIOT_MIN_DBZ, -1.0, cap), niot)
-            print(f"[bot-export] maxz: {int(over.sum())} NIOT nodes held to the Chennai DWR")
+            capped = np.where(cap < BOT_NIOT_MIN_DBZ, -1.0, cap)
+            strong_before = int((np.isfinite(niot) & (niot >= 40)).sum())
+            regridded["maxz"] = np.where(over, capped, niot)
+            strong_after = int((np.isfinite(regridded["maxz"]) & (regridded["maxz"] >= 40)).sum())
+            print(f"[bot-export] maxz: {int(over.sum())} NIOT nodes held to the Chennai DWR ({', '.join(used_refs)}; "
+                  f">= 40 dBZ: {strong_before} -> {strong_after})")
 
     # ---- weak far echo of the long-range products (ported from the test repo, 31 Oct 2026) ----
     # Beyond 250 km the beam is 6-10 km up. Weak patches there fed two false Thoothukudi alerts on 31 Oct (Karaikal
