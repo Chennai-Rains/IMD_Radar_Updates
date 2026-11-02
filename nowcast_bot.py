@@ -488,7 +488,7 @@ PRODUCTS = {
         # gridlines printed on the panel) -- site_px/km_per_px measured
         # from THIS frame's own gridlines + site marker, see the
         # calibration-status comment above RADAR_SITES.
-        "site_px": (240.0, 447.0),
+        "site_px": (249.3, 447.2),   # 3 Nov 2026: centre of the range rings = 13.0837N 80.2901E on the printed graticule (was 240.0/447.0, IMD's "CHN" marker, which sits ~8.5 km inland)
         "km_per_px": 1.000,        # frame's own metadata prints "Hor Res: 1.000 km/pixel" -- confirmed independently via the gridline fit on both axes
         "colorbar_bbox": (712, 74, 785, 424),
         "value_at_top": 60.0,      # same uniform 2.5dB/band MAX(dBZ) scale as every other MAXZ/PPZ product
@@ -594,7 +594,7 @@ PRODUCTS = {
         "max_range_km": 135.0,
         "elevation_deg": 0.2,
         "image_size": (1019, 800),
-        "site_px": (375.7, 393.3),
+        "site_px": (399.6, 394.9),   # 3 Nov 2026: 13.0837N 80.2901E on the printed graticule = centre of the range rings (was 375.7/393.3, ~9 km west)
         "km_per_px": 1.0 / 0.375,   # pixels per km (see the note on km_per_px)
         "colorbar_bbox": (810, 74, 886, 622),
         "colorbar_bands": [62.0, 58.0, 54.0, 50.1, 46.2, 42.2, 38.3, 34.3, 30.3, 26.4, 22.4, 18.5, 14.5, 10.5, 6.6, 2.6, 0.0],
