@@ -478,6 +478,8 @@ PRODUCTS = {
         # anti-aliasing leaves a stray khaki row that matches terrain shading
         # (Eastern Ghats) and was decoded as ~40 dBZ (false alert 7 Oct 01:51 IST).
         "far_noise_gate": {"from_km": 130.0, "min_dbz": 30.0, "min_px": 30},   # see decode_reflectivity
+        "weak_speckle_gate": {"to_km": 130.0, "max_dbz": 25.0, "core_min_px": 10, "near_px": 5,
+                              "fill_win": 9, "fill_min": 0.8},   # 3 Nov 2026, see decode_reflectivity
         "min_swatch_rows": 2,
         "role": "aloft_early_warning",
         "range_km": 250.0,         # printed directly in the frame's own metadata panel ("Range: 250 km")
@@ -1782,6 +1784,29 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
             sizes = ndimage.sum(keep, lab, index=np.arange(1, nlab + 1))
             small = np.isin(lab, np.where(sizes < far_gate["min_px"])[0] + 1) & far
             dbz[small] = np.nan
+
+    weak_gate = cfg.get("weak_speckle_gate")
+    if weak_gate:
+        # 3 Nov 2026 (Srikanth): Chennai MAXZ carries a dense field of 20-25 dBZ speckle out to ~70 km around the
+        # radar (clear-air / near-range return), ~2,000 px in one frame, which the map smoothing turns into a pale
+        # green haze over Chennai. It is too dense to fall apart into small blobs, so despeckle_min_px cannot catch
+        # it. Real light rain sits next to stronger echo or fills its surroundings solidly; speckle does neither.
+        # Within to_km, an echo weaker than max_dbz is kept only if it lies within near_px of a patch of >= max_dbz
+        # echo at least core_min_px big, or if at least fill_min of the fill_win x fill_win window around it has echo.
+        # Checked on 1-3 Nov frames: within 70 km 93-100 % of the speckle goes; real light rain keeps 27-92 %.
+        site_x, site_y = cfg["site_px"]
+        yy, xx = np.mgrid[0:h, 0:w]
+        near = np.hypot(xx - (site_x - l), yy - (site_y - t)) / cfg["km_per_px"] <= weak_gate["to_km"]
+        echo = ~np.isnan(dbz)
+        core = echo & (dbz >= weak_gate["max_dbz"])
+        lab, nlab = ndimage.label(core, structure=np.ones((3, 3)))
+        if nlab:
+            sizes = ndimage.sum(core, lab, index=np.arange(1, nlab + 1))
+            core = np.isin(lab, np.flatnonzero(sizes >= weak_gate["core_min_px"]) + 1)
+        by_core = ndimage.binary_dilation(core, iterations=weak_gate["near_px"]) if core.any() else core
+        solid = ndimage.uniform_filter(echo.astype(float), weak_gate["fill_win"]) >= weak_gate["fill_min"]
+        drop = near & echo & (dbz < weak_gate["max_dbz"]) & ~by_core & ~solid
+        dbz[drop] = np.nan
 
     despeckle_min_px = cfg.get("despeckle_min_px")
     if despeckle_min_px is not None:
