@@ -4254,6 +4254,9 @@ BOT_NO_COVERAGE = 255
 # and it is listed in "radars" with status "excluded".
 BOT_EXCLUDED_PRODUCTS: tuple = ()
 BOT_NIOT_REFERENCES: tuple = ("cni_ppi", "cni_maxz")   # Chennai DWR products NIOT is checked against (1 Nov 2026)
+# A backup radar is left out of the bot export whenever any of its primaries has a fresh frame. If the primaries are
+# only late (up to BOT_NIOT_REF_MAX_AGE_MIN) it is used, held to them (the NIOT check below); if they are down, in full.
+BOT_BACKUP_FOR: dict = {"maxz": ("cni_ppi", "cni_maxz")}
 BOT_NIOT_CHECK_KM: float = 6.0       # neighbourhood for the check (frames differ by up to ~10 min)
 BOT_NIOT_MARGIN_DB: float = 5.0      # NIOT may read this much above the Chennai DWR
 BOT_NIOT_REF_MAX_AGE_MIN: float = 90.0   # a late Chennai frame still serves as NIOT's reference up to this age (2 Nov 2026)
@@ -4459,6 +4462,10 @@ def export_bot_data(products: tuple | None = None, now_utc: datetime | None = No
         }
         if p in BOT_EXCLUDED_PRODUCTS:
             entry.update(status="excluded", used=False, motion="no motion: left out of the bot export")
+        elif p in BOT_BACKUP_FOR and any(q in fresh for q in BOT_BACKUP_FOR[p]):
+            # 2 Nov 2026 (Srikanth): NIOT is a backup only. Over 1-2 Nov it read 15-25 dB above the Chennai DWR
+            # (bright band, radial streaks) and drove false Chennai alerts three times.
+            entry.update(status="standby", used=False, motion="no motion: backup only, the Chennai DWR is in use")
         elif p not in _last_dbz:
             entry.update(status="missing", used=False, motion="no motion: no frame this cycle")
         elif p not in fresh:
