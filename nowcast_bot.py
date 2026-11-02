@@ -4480,8 +4480,8 @@ def export_bot_data(products: tuple | None = None, now_utc: datetime | None = No
     refs = [regridded[q] for q in BOT_NIOT_REFERENCES if q in regridded]
     if "maxz" in regridded and refs:
         ref = np.full(lat2d.shape, np.nan)
-        for r_ in refs:
-            ref = np.fmax(ref, r_)
+        for r_ in refs:                      # in order of trust: the PPI wherever it looks, MAXZ only beyond it (2 Nov 2026:
+            ref = np.where(np.isfinite(ref), ref, r_)   # both column-max products read the bright band in stratiform rain)
         seen = np.isfinite(ref)
         rad = max(1, int(round(BOT_NIOT_CHECK_KM / (step * 111.0))))
         ref_near = ndimage.maximum_filter(np.where(seen, ref, -1.0), size=2 * rad + 1)
