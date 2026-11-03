@@ -2,22 +2,22 @@
   "maxz": [],
   "kkl_maxz": [
     {
-      "id": 8,
+      "id": 3,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.71943683072879,
-        79.06204701850437
+        9.714449350955027,
+        79.03970982787547
       ],
-      "max_dbz": 43.4,
-      "pixel_count": 22,
-      "px": 171.45454545454547,
-      "py": 400.8636363636364,
-      "range_km": 158.7,
+      "max_dbz": 44.6,
+      "pixel_count": 25,
+      "px": 168.92,
+      "py": 401.44,
+      "range_km": 160.5,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        13.2,
-        252.0
+        8.5,
+        257.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
@@ -29,68 +29,46 @@
       "id": 1,
       "product": "cni_maxz",
       "centroid_latlon": [
-        15.034310063063064,
-        80.95437460981287
+        14.96265667890968,
+        80.87519389387178
       ],
-      "max_dbz": 46.7,
-      "pixel_count": 32,
-      "px": 321.125,
-      "py": 32.6875,
-      "range_km": 228.4,
+      "max_dbz": 45.4,
+      "pixel_count": 39,
+      "px": 312.56410256410254,
+      "py": 40.64102564102564,
+      "range_km": 218.3,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        11.5,
-        16.0
+        48.9,
+        55.0
       ],
       "trend": "steady",
       "confirmed_at_surface": false
     },
     {
-      "id": 2,
+      "id": 3,
       "product": "cni_maxz",
       "centroid_latlon": [
-        14.925465641718642,
-        80.82728822672061
+        14.568375378378379,
+        80.42746414919294
       ],
-      "max_dbz": 44.3,
-      "pixel_count": 26,
-      "px": 307.38461538461536,
-      "py": 44.76923076923077,
-      "range_km": 212.8,
+      "max_dbz": 48.9,
+      "pixel_count": 32,
+      "px": 264.15625,
+      "py": 84.40625,
+      "range_km": 165.7,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        11.0,
-        34.0
+        25.4,
+        51.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
   "cni_ppi": [],
-  "mlr_maxz": [
-    {
-      "id": 1,
-      "product": "mlr_maxz",
-      "centroid_latlon": [
-        13.299987070541343,
-        75.14008847657604
-      ],
-      "max_dbz": 57.6,
-      "pixel_count": 7,
-      "px": 492.85714285714283,
-      "py": 365.7142857142857,
-      "range_km": 47.4,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        0.0,
-        191.0
-      ],
-      "trend": "unknown",
-      "confirmed_at_surface": false
-    }
-  ],
+  "mlr_maxz": [],
   "tvm_ppi": []
 }
