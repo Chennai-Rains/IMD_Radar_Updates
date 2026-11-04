@@ -5,21 +5,63 @@
       "id": 5,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        9.628261924454472,
-        79.05010928032752
+        9.688835416974943,
+        79.36121154435926
       ],
-      "max_dbz": 42.1,
+      "max_dbz": 39.9,
       "pixel_count": 10,
-      "px": 170.1,
-      "py": 411.4,
-      "range_km": 168.0,
+      "px": 205.4,
+      "py": 404.4,
+      "range_km": 147.1,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
         4.7,
-        214.0
+        298.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 6,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        9.600163968260102,
+        79.06685416139439
+      ],
+      "max_dbz": 43.8,
+      "pixel_count": 34,
+      "px": 172.0,
+      "py": 414.6470588235294,
+      "range_km": 169.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        23.4,
+        144.0
       ],
       "trend": "steady",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 7,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        9.513048669293083,
+        79.17387031858864
+      ],
+      "max_dbz": 36.9,
+      "pixel_count": 7,
+      "px": 184.14285714285714,
+      "py": 424.7142857142857,
+      "range_km": 173.0,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        22.5,
+        148.0
+      ],
+      "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
@@ -48,28 +90,6 @@
     }
   ],
   "cni_ppi": [],
-  "mlr_maxz": [
-    {
-      "id": 1,
-      "product": "mlr_maxz",
-      "centroid_latlon": [
-        11.320442365823427,
-        73.92853180194395
-      ],
-      "max_dbz": 57.6,
-      "pixel_count": 7,
-      "px": 265.85714285714283,
-      "py": 746.2857142857143,
-      "range_km": 209.2,
-      "beam_height_km": 0.0,
-      "elevated": false,
-      "velocity_kmh": [
-        3.4,
-        178.0
-      ],
-      "trend": "intensifying",
-      "confirmed_at_surface": false
-    }
-  ],
+  "mlr_maxz": [],
   "tvm_ppi": []
 }
