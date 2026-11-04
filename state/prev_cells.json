@@ -2,29 +2,93 @@
   "maxz": [],
   "kkl_maxz": [
     {
-      "id": 8,
+      "id": 5,
       "product": "kkl_maxz",
       "centroid_latlon": [
-        10.303223698254012,
-        79.26779273419676
+        11.323454379420243,
+        79.95367187579083
       ],
-      "max_dbz": 41.4,
-      "pixel_count": 5,
-      "px": 194.8,
-      "py": 333.4,
-      "range_km": 93.1,
+      "max_dbz": 44.1,
+      "pixel_count": 8,
+      "px": 272.625,
+      "py": 215.5,
+      "range_km": 46.0,
       "beam_height_km": 0.0,
       "elevated": false,
       "velocity_kmh": [
-        9.5,
-        316.0
+        3.1,
+        116.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 6,
+      "product": "kkl_maxz",
+      "centroid_latlon": [
+        10.952225403830495,
+        79.97989083430343
+      ],
+      "max_dbz": 44.4,
+      "pixel_count": 5,
+      "px": 275.6,
+      "py": 258.4,
+      "range_km": 15.8,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        7.1,
+        70.0
       ],
       "trend": "unknown",
       "confirmed_at_surface": false
     }
   ],
   "kkl_ppz": [],
-  "cni_maxz": [],
+  "cni_maxz": [
+    {
+      "id": 1,
+      "product": "cni_maxz",
+      "centroid_latlon": [
+        14.635098351351353,
+        80.64000983891292
+      ],
+      "max_dbz": 41.0,
+      "pixel_count": 22,
+      "px": 287.1363636363636,
+      "py": 77.0,
+      "range_km": 176.6,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        35.0,
+        22.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    },
+    {
+      "id": 3,
+      "product": "cni_maxz",
+      "centroid_latlon": [
+        14.095201311454312,
+        81.88209377204221
+      ],
+      "max_dbz": 41.2,
+      "pixel_count": 14,
+      "px": 421.42857142857144,
+      "py": 136.92857142857142,
+      "range_km": 205.6,
+      "beam_height_km": 0.0,
+      "elevated": false,
+      "velocity_kmh": [
+        0.0,
+        192.0
+      ],
+      "trend": "unknown",
+      "confirmed_at_surface": false
+    }
+  ],
   "cni_ppi": [
     {
       "id": 1,
