@@ -477,7 +477,8 @@ PRODUCTS = {
         # Drop colour-bar swatches only 1 row tall: on some frames the bar's
         # anti-aliasing leaves a stray khaki row that matches terrain shading
         # (Eastern Ghats) and was decoded as ~40 dBZ (false alert 7 Oct 01:51 IST).
-        "far_noise_gate": {"from_km": 130.0, "min_dbz": 30.0, "min_px": 30},   # see decode_reflectivity
+        "far_noise_gate": {"from_km": 130.0, "min_dbz": 30.0, "min_px": 30,
+                           "blob_min_dbz": 27.0, "blob_min_px": 15, "blob_strong_px": 5},   # see decode_reflectivity
         "weak_speckle_gate": {"to_km": 130.0, "max_dbz": 25.0, "core_min_px": 10, "near_px": 5,
                               "fill_win": 9, "fill_min": 0.8},   # 3 Nov 2026, see decode_reflectivity
         "min_swatch_rows": 2,
@@ -1777,12 +1778,28 @@ def decode_reflectivity(img: Image.Image, product: str, lut: list) -> np.ndarray
         site_x, site_y = cfg["site_px"]
         yy, xx = np.mgrid[0:h, 0:w]
         far = np.hypot(xx - (site_x - l), yy - (site_y - t)) / cfg["km_per_px"] > far_gate["from_km"]
-        dbz[far & (dbz < far_gate["min_dbz"])] = np.nan
+        # 4 Nov 2026 (Srikanth): small showers 150-200 km ENE of Chennai were missing from the map. Their cores are
+        # only a few px of >= 30 dBZ inside 40-110 px of 25-30 dBZ, so cutting < min_dbz first broke them into
+        # pieces under min_px. Optional "blob_*" keys: a far patch of >= blob_min_dbz echo that is >= blob_min_px
+        # big and holds >= blob_strong_px px of >= min_dbz is kept too (its >= blob_min_dbz part). The noise ring
+        # is 20-27 dBZ dashes and single pixels, which never form such patches.
+        rescued = np.zeros_like(far)
+        if far_gate.get("blob_min_dbz") is not None:
+            v = np.nan_to_num(dbz, nan=-1.0)
+            e = v >= far_gate["blob_min_dbz"]
+            lab, nlab = ndimage.label(e, structure=np.ones((3, 3)))
+            if nlab:
+                idx = np.arange(1, nlab + 1)
+                sizes = ndimage.sum(e, lab, index=idx)
+                strong = ndimage.sum(v >= far_gate["min_dbz"], lab, index=idx)
+                ok = idx[(sizes >= far_gate["blob_min_px"]) & (strong >= far_gate["blob_strong_px"])]
+                rescued = np.isin(lab, ok) & far
+        dbz[far & (dbz < far_gate["min_dbz"]) & ~rescued] = np.nan
         keep = ~np.isnan(dbz)
         lab, nlab = ndimage.label(keep, structure=np.ones((3, 3)))
         if nlab:
             sizes = ndimage.sum(keep, lab, index=np.arange(1, nlab + 1))
-            small = np.isin(lab, np.where(sizes < far_gate["min_px"])[0] + 1) & far
+            small = np.isin(lab, np.where(sizes < far_gate["min_px"])[0] + 1) & far & ~rescued
             dbz[small] = np.nan
 
     weak_gate = cfg.get("weak_speckle_gate")
