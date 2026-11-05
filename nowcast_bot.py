@@ -4182,6 +4182,12 @@ RADAR_LOOP_HTML_TEMPLATE = """<!doctype html>
 """
 
 
+# 5 Nov 2026 (Srikanth): radar loop switched off for now. Its three GIFs (~13 MB a cycle) made the FTP upload die
+# with "read ECONNRESET" from 1:45 AM IST and froze the live map. With it off they are no longer copied to output/,
+# so the next successful sync also removes them from the server. Set True to bring the loop back.
+RADAR_LOOP_PUBLISH = False
+
+
 def publish_radar_loop(rebuild: bool) -> None:
     """Writes the three radar-loop GIFs + their HTML page into the
     PERSISTED radar_loop/ dir (committed back to the repo, like
@@ -4885,9 +4891,12 @@ def run_pipeline() -> None:
     except Exception as e:
         print(f"[bot-export] failed (the map above is unaffected): {e!r}")
 
-    capture_mosaic_frame()
-    publish_radar_loop(rebuild=True)
-    print("Updated radar loop (3h/6h/12h)")
+    capture_mosaic_frame()       # still collected, so the loop can come back with its history
+    if RADAR_LOOP_PUBLISH:
+        publish_radar_loop(rebuild=True)
+        print("Updated radar loop (3h/6h/12h)")
+    else:
+        print("Radar loop not published (RADAR_LOOP_PUBLISH = False)")
 
     # .htaccess (Cache-Control headers -- see that file's own comments)
     # needs to land in output/ on EVERY cycle too, for the same reason
