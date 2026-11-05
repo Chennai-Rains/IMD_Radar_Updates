@@ -137,6 +137,33 @@ jobs:
           commit_user_name: "nowcast-bot"
           commit_user_email: "actions@users.noreply.github.com"
 
+      - name: Stage the map page on its own
+        # 5 Nov 2026: from 1:45 AM IST the one big sync of ./output/ (~13-29 MB a cycle, mostly the 3/6/12 h radar
+        # loop GIFs) kept dying with "read ECONNRESET (control socket)" partway through, BEFORE it reached
+        # storm_forecast_map.html, so the live map froze at 1:41 AM. The page (and the bot files) now go up first
+        # in a small separate upload, so a failure on the big GIFs can no longer hold the map back.
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p output_page
+          for f in storm_forecast_map.html nowcast_bot.json nowcast_bot_grid.bin.gz; do
+            [ -f "output/$f" ] && cp "output/$f" output_page/ || true
+          done
+          ls -la output_page
+
+      - name: Upload the map page first (small)
+        if: ${{ !cancelled() }}
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: 21
+          protocol: ftps
+          local-dir: ./output_page/
+          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
+          state-name: .ftp-deploy-sync-state-page.json
+          dangerous-clean-slate: false
+
       - name: Upload storm_forecast_map.html to plots.chennairains.com
         # Runs even if the state-tracking commit above failed (e.g. a
         # push race that self-heals next cycle) -- the map file itself
