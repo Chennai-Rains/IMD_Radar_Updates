@@ -163,6 +163,7 @@ jobs:
           server-dir: ${{ secrets.FTP_REMOTE_DIR }}
           state-name: .ftp-deploy-sync-state-page.json
           dangerous-clean-slate: false
+          timeout: 120000   # 6 Nov 2026: the host often takes > 30 s (the default) to answer; uploads died at exactly 30 s
 
       - name: Upload storm_forecast_map.html to plots.chennairains.com
         # Runs even if the state-tracking commit above failed (e.g. a
@@ -189,6 +190,7 @@ jobs:
           # Never delete anything already sitting in that remote folder --
           # this only ever adds/overwrites storm_forecast_map.html.
           dangerous-clean-slate: false
+          timeout: 120000   # 6 Nov 2026: the host often takes > 30 s (the default) to answer; uploads died at exactly 30 s
 
       - name: Purge Cloudflare cache for the files just uploaded
         # plots.chennairains.com is proxied through Cloudflare. Once
